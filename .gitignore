@@ -1,0 +1,31 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+*.nupkg
+**/appsettings.Development.json
+
+# Uploads
+uploads/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Environment
+.env
+*.local
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.idea/
+*.swp
+*.swo

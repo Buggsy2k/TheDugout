@@ -1,0 +1,429 @@
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Save, Trash2, ArrowLeft, Upload } from 'lucide-react';
+import { cardApi, binderApi } from '../services/api';
+import type { Card, CreateCard, UpdateCard, Binder } from '../types';
+import { CONDITIONS } from '../types';
+import LoadingSkeleton from '../components/LoadingSkeleton';
+import toast from 'react-hot-toast';
+
+const API_BASE = 'http://localhost:5137';
+
+const emptyCard: CreateCard = {
+  binderNumber: 1,
+  pageNumber: 1,
+  row: 1,
+  column: 1,
+  playerName: '',
+  year: new Date().getFullYear(),
+  setName: '',
+  cardNumber: undefined,
+  team: undefined,
+  manufacturer: undefined,
+  estimatedCondition: 'UNKNOWN',
+  conditionNotes: undefined,
+  valueRangeLow: undefined,
+  valueRangeHigh: undefined,
+  notes: undefined,
+  tags: undefined,
+  isGraded: false,
+  gradingService: undefined,
+  gradeValue: undefined,
+};
+
+export default function CardDetail() {
+  const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const isNew = id === 'new';
+
+  const [form, setForm] = useState<CreateCard | UpdateCard>({ ...emptyCard });
+  const [existingCard, setExistingCard] = useState<Card | null>(null);
+  const [binders, setBinders] = useState<Binder[]>([]);
+  const [loading, setLoading] = useState(!isNew);
+  const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    binderApi.getBinders().then(setBinders).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (isNew) {
+      const binder = searchParams.get('binder');
+      const page = searchParams.get('page');
+      const row = searchParams.get('row');
+      const col = searchParams.get('col');
+      setForm({
+        ...emptyCard,
+        binderNumber: binder ? parseInt(binder) : 1,
+        pageNumber: page ? parseInt(page) : 1,
+        row: row ? parseInt(row) : 1,
+        column: col ? parseInt(col) : 1,
+      });
+      return;
+    }
+
+    setLoading(true);
+    cardApi.getCard(parseInt(id!))
+      .then(card => {
+        setExistingCard(card);
+        setForm({
+          binderNumber: card.binderNumber,
+          pageNumber: card.pageNumber,
+          row: card.row,
+          column: card.column,
+          playerName: card.playerName,
+          year: card.year,
+          setName: card.setName,
+          cardNumber: card.cardNumber ?? undefined,
+          team: card.team ?? undefined,
+          manufacturer: card.manufacturer ?? undefined,
+          estimatedCondition: card.estimatedCondition,
+          conditionNotes: card.conditionNotes ?? undefined,
+          valueRangeLow: card.valueRangeLow ?? undefined,
+          valueRangeHigh: card.valueRangeHigh ?? undefined,
+          notes: card.notes ?? undefined,
+          tags: card.tags ?? undefined,
+          isGraded: card.isGraded,
+          gradingService: card.gradingService ?? undefined,
+          gradeValue: card.gradeValue ?? undefined,
+        });
+        if (card.imagePath) {
+          setImagePreview(`${API_BASE}${card.imagePath}`);
+        }
+      })
+      .catch(() => toast.error('Card not found'))
+      .finally(() => setLoading(false));
+  }, [id, isNew, searchParams]);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.playerName.trim() || !form.setName.trim()) {
+      toast.error('Player name and set name are required');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let savedCard: Card;
+      if (isNew) {
+        savedCard = await cardApi.createCard(form as CreateCard);
+        toast.success('Card created!');
+      } else {
+        savedCard = await cardApi.updateCard(parseInt(id!), form as UpdateCard);
+        toast.success('Card updated!');
+      }
+
+      if (imageFile) {
+        await cardApi.uploadImage(savedCard.id, imageFile);
+      }
+
+      navigate(`/cards/${savedCard.id}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save card';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this card? This cannot be undone.')) return;
+    try {
+      await cardApi.deleteCard(parseInt(id!));
+      toast.success('Card deleted');
+      navigate('/collection');
+    } catch {
+      toast.error('Failed to delete card');
+    }
+  };
+
+  const updateField = <K extends keyof CreateCard>(field: K, value: CreateCard[K]) => {
+    setForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  if (loading) {
+    return (
+      <div className="page">
+        <LoadingSkeleton count={1} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="page card-detail-page">
+      <div className="card-detail-header">
+        <button className="btn btn-ghost" onClick={() => navigate(-1)}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <h1 className="page-title">{isNew ? 'Add New Card' : `Edit: ${existingCard?.playerName}`}</h1>
+      </div>
+
+      <form className="card-form" onSubmit={handleSubmit}>
+        <div className="card-form-grid">
+          {/* Image section */}
+          <div className="card-form-image">
+            <div className="image-upload-area">
+              {imagePreview ? (
+                <img src={imagePreview} alt="Card preview" className="image-preview" />
+              ) : (
+                <div className="image-placeholder">
+                  <Upload size={32} />
+                  <span>Upload Image</span>
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={handleImageChange}
+                className="image-input"
+              />
+            </div>
+          </div>
+
+          {/* Card info fields */}
+          <div className="card-form-fields">
+            <div className="form-row">
+              <div className="form-group">
+                <label>Player Name *</label>
+                <input
+                  type="text"
+                  value={form.playerName}
+                  onChange={e => updateField('playerName', e.target.value)}
+                  required
+                  placeholder="e.g. Mickey Mantle"
+                />
+              </div>
+              <div className="form-group">
+                <label>Year *</label>
+                <input
+                  type="number"
+                  value={form.year}
+                  onChange={e => updateField('year', parseInt(e.target.value) || 0)}
+                  required
+                  min={1800}
+                  max={2100}
+                />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Set Name *</label>
+                <input
+                  type="text"
+                  value={form.setName}
+                  onChange={e => updateField('setName', e.target.value)}
+                  required
+                  placeholder="e.g. Topps"
+                />
+              </div>
+              <div className="form-group">
+                <label>Card Number</label>
+                <input
+                  type="text"
+                  value={form.cardNumber || ''}
+                  onChange={e => updateField('cardNumber', e.target.value || undefined)}
+                  placeholder="e.g. 150"
+                />
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Team</label>
+                <input
+                  type="text"
+                  value={form.team || ''}
+                  onChange={e => updateField('team', e.target.value || undefined)}
+                  placeholder="e.g. New York Yankees"
+                />
+              </div>
+              <div className="form-group">
+                <label>Manufacturer</label>
+                <input
+                  type="text"
+                  value={form.manufacturer || ''}
+                  onChange={e => updateField('manufacturer', e.target.value || undefined)}
+                  placeholder="e.g. Topps"
+                />
+              </div>
+            </div>
+
+            <h3 className="form-section-title">Location</h3>
+            <div className="form-row form-row-4">
+              <div className="form-group">
+                <label>Binder</label>
+                <input
+                  type="number"
+                  value={form.binderNumber}
+                  onChange={e => updateField('binderNumber', parseInt(e.target.value) || 1)}
+                  min={1}
+                />
+              </div>
+              <div className="form-group">
+                <label>Page</label>
+                <input
+                  type="number"
+                  value={form.pageNumber}
+                  onChange={e => updateField('pageNumber', parseInt(e.target.value) || 1)}
+                  min={1}
+                />
+              </div>
+              <div className="form-group">
+                <label>Row</label>
+                <input
+                  type="number"
+                  value={form.row}
+                  onChange={e => updateField('row', parseInt(e.target.value) || 1)}
+                  min={1}
+                />
+              </div>
+              <div className="form-group">
+                <label>Column</label>
+                <input
+                  type="number"
+                  value={form.column}
+                  onChange={e => updateField('column', parseInt(e.target.value) || 1)}
+                  min={1}
+                />
+              </div>
+            </div>
+
+            <h3 className="form-section-title">Condition & Value</h3>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Estimated Condition {!form.isGraded && <span className="hint">(owner's estimate)</span>}</label>
+                <select
+                  value={form.estimatedCondition}
+                  onChange={e => updateField('estimatedCondition', e.target.value)}
+                >
+                  {CONDITIONS.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Condition Notes</label>
+              <input
+                type="text"
+                value={form.conditionNotes || ''}
+                onChange={e => updateField('conditionNotes', e.target.value || undefined)}
+                placeholder="e.g. visible crease across center"
+              />
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Value Range Low ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.valueRangeLow ?? ''}
+                  onChange={e => updateField('valueRangeLow', e.target.value ? parseFloat(e.target.value) : undefined)}
+                />
+              </div>
+              <div className="form-group">
+                <label>Value Range High ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.valueRangeHigh ?? ''}
+                  onChange={e => updateField('valueRangeHigh', e.target.value ? parseFloat(e.target.value) : undefined)}
+                />
+              </div>
+            </div>
+
+            <h3 className="form-section-title">Grading</h3>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={form.isGraded}
+                    onChange={e => updateField('isGraded', e.target.checked)}
+                  />
+                  <span>Professionally Graded</span>
+                </label>
+              </div>
+            </div>
+            {form.isGraded && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Grading Service</label>
+                  <select
+                    value={form.gradingService || ''}
+                    onChange={e => updateField('gradingService', e.target.value || undefined)}
+                  >
+                    <option value="">Select...</option>
+                    <option value="PSA">PSA</option>
+                    <option value="BGS">BGS (Beckett)</option>
+                    <option value="SGC">SGC</option>
+                    <option value="CGC">CGC</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Grade</label>
+                  <input
+                    type="text"
+                    value={form.gradeValue || ''}
+                    onChange={e => updateField('gradeValue', e.target.value || undefined)}
+                    placeholder="e.g. 8"
+                  />
+                </div>
+              </div>
+            )}
+
+            <h3 className="form-section-title">Additional Info</h3>
+            <div className="form-group">
+              <label>Notes</label>
+              <textarea
+                value={form.notes || ''}
+                onChange={e => updateField('notes', e.target.value || undefined)}
+                placeholder="e.g. NL All-Stars subset, double printed"
+                rows={3}
+              />
+            </div>
+            <div className="form-group">
+              <label>Tags <span className="hint">(comma-separated)</span></label>
+              <input
+                type="text"
+                value={form.tags || ''}
+                onChange={e => updateField('tags', e.target.value || undefined)}
+                placeholder="e.g. rookie,hall-of-fame,error"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="card-form-actions">
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}>
+            Cancel
+          </button>
+          {!isNew && (
+            <button type="button" className="btn btn-danger" onClick={handleDelete}>
+              <Trash2 size={16} /> Delete
+            </button>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            <Save size={16} /> {saving ? 'Saving...' : isNew ? 'Create Card' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
