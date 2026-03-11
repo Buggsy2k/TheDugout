@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Layout from './components/Layout';
+import { TokenUsageProvider } from './contexts/TokenUsageContext';
 import Dashboard from './pages/Dashboard';
 import CollectionBrowser from './pages/CollectionBrowser';
 import BinderList from './pages/BinderList';
@@ -14,6 +15,7 @@ import './style.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
+      <TokenUsageProvider>
       <Toaster position="top-right" />
       <Layout>
         <Routes>
@@ -26,6 +28,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/bulk-entry" element={<BulkEntry />} />
         </Routes>
       </Layout>
+      </TokenUsageProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

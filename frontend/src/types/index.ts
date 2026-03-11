@@ -63,6 +63,7 @@ export interface CardQueryParams {
   valueHigh?: number;
   tags?: string;
   isGraded?: boolean;
+  isUnassigned?: boolean;
   sortBy?: string;
   sortDir?: string;
   pageNum?: number;
@@ -102,6 +103,19 @@ export interface Binder {
 
 export interface BinderDetail extends Binder {
   cards: Card[];
+}
+
+export interface ConflictCheckResult {
+  hasConflicts: boolean;
+  conflictingCards: Card[];
+  suggestion?: NextAvailableSuggestion;
+}
+
+export interface NextAvailableSuggestion {
+  binderNumber: number;
+  pageNumber: number;
+  row?: number;
+  column?: number;
 }
 
 export interface CreateBinder {
@@ -144,4 +158,48 @@ export function formatValueRange(low?: number, high?: number): string {
 
 export function formatLocation(binderNumber: number, pageNumber: number, row: number, column: number): string {
   return `B${binderNumber} / P${pageNumber} / R${row}-C${column}`;
+}
+
+// AI identification types
+export interface TokenUsageInfo {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  tokensRemaining?: number;
+  tokensLimit?: number;
+  inputTokensRemaining?: number;
+  outputTokensRemaining?: number;
+}
+
+export interface AiResponse<T> {
+  result: T;
+  tokenUsage: TokenUsageInfo;
+}
+
+export interface CardIdentificationResult {
+  playerName: string;
+  year?: number;
+  setName?: string;
+  cardNumber?: string;
+  team?: string;
+  manufacturer?: string;
+  estimatedCondition?: string;
+  conditionNotes?: string;
+  valueRangeLow?: number;
+  valueRangeHigh?: number;
+  notes?: string;
+  tags?: string;
+  confidence: number;
+}
+
+export interface PageCardResult {
+  row: number;
+  column: number;
+  card?: CardIdentificationResult;
+  isEmpty: boolean;
+}
+
+export interface PageIdentificationResult {
+  cards: PageCardResult[];
+  pageNotes?: string;
 }

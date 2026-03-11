@@ -10,6 +10,10 @@ import type {
   BinderDetail,
   CreateBinder,
   UpdateBinder,
+  AiResponse,
+  CardIdentificationResult,
+  PageIdentificationResult,
+  ConflictCheckResult,
 } from '../types';
 
 const api = axios.create({
@@ -53,6 +57,22 @@ export const cardApi = {
   getStats(): Promise<CollectionStats> {
     return api.get('/cards/stats').then(r => r.data);
   },
+
+  checkPageConflicts(binderNumber: number, pageNumbers: number[]): Promise<ConflictCheckResult> {
+    return api.get('/cards/check-page-conflicts', {
+      params: { binderNumber, pageNumbers: pageNumbers.join(',') },
+    }).then(r => r.data);
+  },
+
+  checkSlotConflict(binderNumber: number, pageNumber: number, row: number, column: number): Promise<ConflictCheckResult> {
+    return api.get('/cards/check-slot-conflict', {
+      params: { binderNumber, pageNumber, row, column },
+    }).then(r => r.data);
+  },
+
+  unassignCards(cardIds: number[]): Promise<Card[]> {
+    return api.post('/cards/unassign', { cardIds }).then(r => r.data);
+  },
 };
 
 // Binders API
@@ -90,6 +110,26 @@ export const pageApi = {
     return api.post('/pages/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       params: { binderNumber, pageNumber },
+    }).then(r => r.data);
+  },
+};
+
+// AI API
+export const aiApi = {
+  identifyCard(file: File): Promise<AiResponse<CardIdentificationResult>> {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/ai/identify-card', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data);
+  },
+
+  identifyPage(file: File, layout: '3x3' | '6x3' = '3x3'): Promise<AiResponse<PageIdentificationResult>> {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/ai/identify-page', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { layout },
     }).then(r => r.data);
   },
 };

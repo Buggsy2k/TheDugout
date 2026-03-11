@@ -95,4 +95,42 @@ public class CardsController : ControllerBase
         var stats = await _cardService.GetStatsAsync();
         return Ok(stats);
     }
+
+    [HttpGet("check-page-conflicts")]
+    public async Task<ActionResult<ConflictCheckResult>> CheckPageConflicts(
+        [FromQuery] int binderNumber, [FromQuery] string pageNumbers)
+    {
+        if (string.IsNullOrWhiteSpace(pageNumbers))
+            return BadRequest("pageNumbers is required");
+
+        var pages = pageNumbers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(p => int.TryParse(p, out var v) ? v : -1)
+            .Where(v => v > 0)
+            .ToArray();
+
+        if (pages.Length == 0)
+            return BadRequest("No valid page numbers provided");
+
+        var result = await _cardService.CheckPageConflictsAsync(binderNumber, pages);
+        return Ok(result);
+    }
+
+    [HttpGet("check-slot-conflict")]
+    public async Task<ActionResult<ConflictCheckResult>> CheckSlotConflict(
+        [FromQuery] int binderNumber, [FromQuery] int pageNumber,
+        [FromQuery] int row, [FromQuery] int column)
+    {
+        var result = await _cardService.CheckSlotConflictAsync(binderNumber, pageNumber, row, column);
+        return Ok(result);
+    }
+
+    [HttpPost("unassign")]
+    public async Task<ActionResult<List<CardDto>>> UnassignCards([FromBody] UnassignRequest request)
+    {
+        if (request.CardIds == null || request.CardIds.Count == 0)
+            return BadRequest("No card IDs provided");
+
+        var unassigned = await _cardService.UnassignCardsAsync(request.CardIds);
+        return Ok(unassigned);
+    }
 }

@@ -19,7 +19,8 @@ public class AppDbContext : DbContext
         {
             entity.HasIndex(c => new { c.BinderNumber, c.PageNumber, c.Row, c.Column })
                   .IsUnique()
-                  .HasDatabaseName("IX_Card_Location");
+                  .HasDatabaseName("IX_Card_Location")
+                  .HasFilter("\"IsUnassigned\" = false");
 
             entity.HasIndex(c => c.PlayerName);
             entity.HasIndex(c => c.Year);

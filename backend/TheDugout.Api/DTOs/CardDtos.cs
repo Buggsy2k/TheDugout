@@ -24,6 +24,7 @@ public class CardDto
     public bool IsGraded { get; set; }
     public string? GradingService { get; set; }
     public string? GradeValue { get; set; }
+    public bool IsUnassigned { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
@@ -89,6 +90,7 @@ public class CardQueryParams
     public decimal? ValueHigh { get; set; }
     public string? Tags { get; set; }
     public bool? IsGraded { get; set; }
+    public bool? IsUnassigned { get; set; }
     public string SortBy { get; set; } = "playerName";
     public string SortDir { get; set; } = "asc";
     public int PageNum { get; set; } = 1;
@@ -139,4 +141,24 @@ public class DecadeBreakdown
 {
     public string Decade { get; set; } = string.Empty;
     public int Count { get; set; }
+}
+
+public class ConflictCheckResult
+{
+    public bool HasConflicts { get; set; }
+    public List<CardDto> ConflictingCards { get; set; } = new();
+    public NextAvailableSuggestion? Suggestion { get; set; }
+}
+
+public class NextAvailableSuggestion
+{
+    public int BinderNumber { get; set; }
+    public int PageNumber { get; set; }
+    public int? Row { get; set; }
+    public int? Column { get; set; }
+}
+
+public class UnassignRequest
+{
+    public List<int> CardIds { get; set; } = new();
 }

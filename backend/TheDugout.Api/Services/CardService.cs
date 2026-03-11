@@ -18,6 +18,12 @@ public class CardService
     {
         var q = _db.Cards.AsQueryable();
 
+        // Filter by assignment status (default: show only assigned cards)
+        if (query.IsUnassigned.HasValue)
+            q = q.Where(c => c.IsUnassigned == query.IsUnassigned.Value);
+        else
+            q = q.Where(c => !c.IsUnassigned);
+
         // Full-text search
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -250,7 +256,7 @@ public class CardService
 
     public async Task<CollectionStats> GetStatsAsync()
     {
-        var cards = _db.Cards.AsQueryable();
+        var cards = _db.Cards.Where(c => !c.IsUnassigned);
         var totalCards = await cards.CountAsync();
 
         var stats = new CollectionStats
@@ -279,10 +285,12 @@ public class CardService
                 .Take(10)
                 .Select(c => MapToDto(c))
                 .ToListAsync(),
-            ByDecade = await cards.GroupBy(c => (c.Year / 10) * 10)
-                .Select(g => new DecadeBreakdown { Decade = $"{g.Key}s", Count = g.Count() })
+            ByDecade = (await cards.GroupBy(c => (c.Year / 10) * 10)
+                .Select(g => new { Decade = g.Key, Count = g.Count() })
                 .OrderBy(d => d.Decade)
-                .ToListAsync()
+                .ToListAsync())
+                .Select(d => new DecadeBreakdown { Decade = $"{d.Decade}s", Count = d.Count })
+                .ToList()
         };
 
         return stats;
@@ -291,7 +299,7 @@ public class CardService
     public async Task<List<CardDto>> GetPageCardsAsync(int binderNumber, int pageNumber)
     {
         return await _db.Cards
-            .Where(c => c.BinderNumber == binderNumber && c.PageNumber == pageNumber)
+            .Where(c => c.BinderNumber == binderNumber && c.PageNumber == pageNumber && !c.IsUnassigned)
             .OrderBy(c => c.Row).ThenBy(c => c.Column)
             .Select(c => MapToDto(c))
             .ToListAsync();
@@ -333,6 +341,7 @@ public class CardService
         Notes = c.Notes,
         Tags = c.Tags,
         IsGraded = c.IsGraded,
+        IsUnassigned = c.IsUnassigned,
         GradingService = c.GradingService,
         GradeValue = c.GradeValue,
         CreatedAt = c.CreatedAt,
@@ -345,4 +354,126 @@ public class CardService
         ["VGEX"] = 4, ["EX"] = 5, ["EXMT"] = 6,
         ["NM"] = 7, ["NMMT"] = 8, ["MT"] = 9, ["GEM"] = 10, ["UNKNOWN"] = -1
     };
+
+    public async Task<ConflictCheckResult> CheckPageConflictsAsync(int binderNumber, int[] pageNumbers)
+    {
+        var existing = await _db.Cards
+            .Where(c => c.BinderNumber == binderNumber
+                        && pageNumbers.Contains(c.PageNumber)
+                        && !c.IsUnassigned)
+            .OrderBy(c => c.PageNumber).ThenBy(c => c.Row).ThenBy(c => c.Column)
+            .Select(c => MapToDto(c))
+            .ToListAsync();
+
+        var result = new ConflictCheckResult
+        {
+            HasConflicts = existing.Count > 0,
+            ConflictingCards = existing
+        };
+
+        if (existing.Count > 0)
+        {
+            var nextPage = await FindNextAvailablePageAsync(binderNumber, pageNumbers.Min());
+            result.Suggestion = new NextAvailableSuggestion
+            {
+                BinderNumber = binderNumber,
+                PageNumber = nextPage
+            };
+        }
+
+        return result;
+    }
+
+    public async Task<ConflictCheckResult> CheckSlotConflictAsync(int binderNumber, int pageNumber, int row, int column)
+    {
+        var existing = await _db.Cards
+            .Where(c => c.BinderNumber == binderNumber
+                        && c.PageNumber == pageNumber
+                        && c.Row == row
+                        && c.Column == column
+                        && !c.IsUnassigned)
+            .Select(c => MapToDto(c))
+            .ToListAsync();
+
+        var result = new ConflictCheckResult
+        {
+            HasConflicts = existing.Count > 0,
+            ConflictingCards = existing
+        };
+
+        if (existing.Count > 0)
+        {
+            var (nextRow, nextCol, nextPageNum) = await FindNextAvailableSlotAsync(binderNumber, pageNumber);
+            result.Suggestion = new NextAvailableSuggestion
+            {
+                BinderNumber = binderNumber,
+                PageNumber = nextPageNum,
+                Row = nextRow,
+                Column = nextCol
+            };
+        }
+
+        return result;
+    }
+
+    public async Task<List<CardDto>> UnassignCardsAsync(List<int> cardIds)
+    {
+        var cards = await _db.Cards
+            .Where(c => cardIds.Contains(c.Id) && !c.IsUnassigned)
+            .ToListAsync();
+
+        foreach (var card in cards)
+        {
+            card.IsUnassigned = true;
+            card.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+        return cards.Select(MapToDto).ToList();
+    }
+
+    private async Task<int> FindNextAvailablePageAsync(int binderNumber, int startPage)
+    {
+        var usedPages = await _db.Cards
+            .Where(c => c.BinderNumber == binderNumber
+                        && c.PageNumber >= startPage
+                        && !c.IsUnassigned)
+            .Select(c => c.PageNumber)
+            .Distinct()
+            .OrderBy(p => p)
+            .ToListAsync();
+
+        var candidate = startPage;
+        foreach (var used in usedPages)
+        {
+            if (used != candidate) break;
+            candidate++;
+        }
+        return candidate;
+    }
+
+    private async Task<(int Row, int Column, int PageNumber)> FindNextAvailableSlotAsync(int binderNumber, int pageNumber)
+    {
+        var occupied = await _db.Cards
+            .Where(c => c.BinderNumber == binderNumber
+                        && c.PageNumber == pageNumber
+                        && !c.IsUnassigned)
+            .Select(c => new { c.Row, c.Column })
+            .ToListAsync();
+
+        var occupiedSet = new HashSet<(int, int)>(occupied.Select(o => (o.Row, o.Column)));
+
+        for (int r = 1; r <= 3; r++)
+        {
+            for (int col = 1; col <= 3; col++)
+            {
+                if (!occupiedSet.Contains((r, col)))
+                    return (r, col, pageNumber);
+            }
+        }
+
+        // Page is full, find next available page
+        var nextPage = await FindNextAvailablePageAsync(binderNumber, pageNumber + 1);
+        return (1, 1, nextPage);
+    }
 }

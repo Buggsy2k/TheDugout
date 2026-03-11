@@ -1,3 +1,4 @@
+using Anthropic.SDK;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using TheDugout.Api.Data;
@@ -8,6 +9,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Database
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Anthropic / Claude Vision
+var anthropicApiKey = builder.Configuration["Anthropic:ApiKey"] ?? "";
+builder.Services.AddSingleton(new AnthropicClient(anthropicApiKey));
+builder.Services.AddScoped<ClaudeVisionService>();
 
 // Services
 builder.Services.AddScoped<CardService>();

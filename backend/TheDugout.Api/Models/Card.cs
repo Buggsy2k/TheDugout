@@ -69,6 +69,8 @@ public class Card
 
     public bool IsGraded { get; set; }
 
+    public bool IsUnassigned { get; set; }
+
     [MaxLength(50)]
     public string? GradingService { get; set; }
 

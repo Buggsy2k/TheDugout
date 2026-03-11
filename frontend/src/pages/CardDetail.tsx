@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Trash2, ArrowLeft, Upload } from 'lucide-react';
-import { cardApi, binderApi } from '../services/api';
-import type { Card, CreateCard, UpdateCard, Binder } from '../types';
+import { Save, Trash2, ArrowLeft, Upload, Sparkles } from 'lucide-react';
+import { cardApi, binderApi, aiApi } from '../services/api';
+import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
 import LoadingSkeleton from '../components/LoadingSkeleton';
+import { useTokenUsage } from '../contexts/TokenUsageContext';
+import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
 import toast from 'react-hot-toast';
 
 const API_BASE = 'http://localhost:5137';
@@ -44,6 +46,13 @@ export default function CardDetail() {
   const [saving, setSaving] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [identifying, setIdentifying] = useState(false);
+  const { updateTokenUsage } = useTokenUsage();
+
+  // Conflict dialog state
+  const [conflictCards, setConflictCards] = useState<Card[]>([]);
+  const [conflictSuggestion, setConflictSuggestion] = useState<NextAvailableSuggestion | undefined>();
+  const [showConflictDialog, setShowConflictDialog] = useState(false);
 
   useEffect(() => {
     binderApi.getBinders().then(setBinders).catch(console.error);
@@ -107,6 +116,40 @@ export default function CardDetail() {
     reader.readAsDataURL(file);
   };
 
+  const handleIdentifyWithAi = async () => {
+    if (!imageFile) {
+      toast.error('Upload an image first');
+      return;
+    }
+    setIdentifying(true);
+    try {
+      const response = await aiApi.identifyCard(imageFile);
+      const result = response.result;
+      updateTokenUsage(response.tokenUsage);
+      setForm(prev => ({
+        ...prev,
+        playerName: result.playerName || prev.playerName,
+        year: result.year ?? prev.year,
+        setName: result.setName || prev.setName,
+        cardNumber: result.cardNumber ?? prev.cardNumber,
+        team: result.team ?? prev.team,
+        manufacturer: result.manufacturer ?? prev.manufacturer,
+        estimatedCondition: result.estimatedCondition || prev.estimatedCondition,
+        conditionNotes: result.conditionNotes ?? prev.conditionNotes,
+        valueRangeLow: result.valueRangeLow ?? prev.valueRangeLow,
+        valueRangeHigh: result.valueRangeHigh ?? prev.valueRangeHigh,
+        notes: result.notes ?? prev.notes,
+        tags: result.tags ?? prev.tags,
+      }));
+      toast.success(`Card identified! (${Math.round(result.confidence * 100)}% confidence)`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'AI identification failed';
+      toast.error(msg);
+    } finally {
+      setIdentifying(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.playerName.trim() || !form.setName.trim()) {
@@ -114,6 +157,59 @@ export default function CardDetail() {
       return;
     }
 
+    // Check for slot conflicts when creating or when position changed
+    const positionChanged = !isNew && existingCard && (
+      existingCard.binderNumber !== form.binderNumber ||
+      existingCard.pageNumber !== form.pageNumber ||
+      existingCard.row !== form.row ||
+      existingCard.column !== form.column
+    );
+
+    if (isNew || positionChanged) {
+      try {
+        const conflict = await cardApi.checkSlotConflict(
+          form.binderNumber, form.pageNumber, form.row, form.column
+        );
+        if (conflict.hasConflicts) {
+          setConflictCards(conflict.conflictingCards);
+          setConflictSuggestion(conflict.suggestion);
+          setShowConflictDialog(true);
+          return;
+        }
+      } catch {
+        // If conflict check fails, proceed anyway
+      }
+    }
+
+    await executeSave();
+  };
+
+  const handleConflictUseSuggestion = (suggestion: NextAvailableSuggestion) => {
+    setShowConflictDialog(false);
+    setForm(prev => ({
+      ...prev,
+      binderNumber: suggestion.binderNumber,
+      pageNumber: suggestion.pageNumber,
+      row: suggestion.row ?? prev.row,
+      column: suggestion.column ?? prev.column,
+    }));
+    toast.success(`Position updated to B${suggestion.binderNumber}/P${suggestion.pageNumber}/R${suggestion.row}-C${suggestion.column}`);
+  };
+
+  const handleConflictOverwrite = async () => {
+    setShowConflictDialog(false);
+    const idsToUnassign = conflictCards.map(c => c.id);
+    try {
+      await cardApi.unassignCards(idsToUnassign);
+      toast.success(`Existing card unassigned`);
+    } catch {
+      toast.error('Failed to unassign existing card');
+      return;
+    }
+    await executeSave();
+  };
+
+  const executeSave = async () => {
     setSaving(true);
     try {
       let savedCard: Card;
@@ -190,6 +286,18 @@ export default function CardDetail() {
                 className="image-input"
               />
             </div>
+            {imageFile && (
+              <button
+                type="button"
+                className="btn btn-accent btn-ai"
+                onClick={handleIdentifyWithAi}
+                disabled={identifying}
+              >
+                <Sparkles size={16} />
+                {identifying ? 'Identifying...' : 'Identify with AI'}
+              </button>
+            )}
+
           </div>
 
           {/* Card info fields */}
@@ -424,6 +532,17 @@ export default function CardDetail() {
           </button>
         </div>
       </form>
+
+      {showConflictDialog && (
+        <ConflictOverwriteDialog
+          mode="slot"
+          conflictingCards={conflictCards}
+          suggestion={conflictSuggestion}
+          onCancel={() => setShowConflictDialog(false)}
+          onUseSuggestion={handleConflictUseSuggestion}
+          onOverwrite={handleConflictOverwrite}
+        />
+      )}
     </div>
   );
 }

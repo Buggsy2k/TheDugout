@@ -1,10 +1,14 @@
 import { useState } from 'react';
-import { Upload } from 'lucide-react';
-import { cardApi, pageApi } from '../services/api';
-import type { CreateCard } from '../types';
+import { Upload, Sparkles, LayoutGrid, Columns } from 'lucide-react';
+import { cardApi, pageApi, aiApi } from '../services/api';
+import type { CreateCard, Card, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { useTokenUsage } from '../contexts/TokenUsageContext';
+import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
+
+type PageLayout = '3x3' | '6x3';
 
 interface CellForm {
   playerName: string;
@@ -30,23 +34,43 @@ const emptyCell: CellForm = {
   notes: '',
 };
 
+function buildEmptyGrid(cols: number): CellForm[][] {
+  return Array.from({ length: 3 }, () =>
+    Array.from({ length: cols }, () => ({ ...emptyCell }))
+  );
+}
+
 export default function BulkEntry() {
   const navigate = useNavigate();
+  const [layout, setLayout] = useState<PageLayout>('3x3');
   const [binderNumber, setBinderNumber] = useState(1);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageImage, setPageImage] = useState<File | null>(null);
   const [pageImagePreview, setPageImagePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const { updateTokenUsage } = useTokenUsage();
 
-  const [cells, setCells] = useState<CellForm[][]>([
-    [{ ...emptyCell }, { ...emptyCell }, { ...emptyCell }],
-    [{ ...emptyCell }, { ...emptyCell }, { ...emptyCell }],
-    [{ ...emptyCell }, { ...emptyCell }, { ...emptyCell }],
-  ]);
+  // Conflict dialog state
+  const [conflictCards, setConflictCards] = useState<Card[]>([]);
+  const [conflictSuggestion, setConflictSuggestion] = useState<NextAvailableSuggestion | undefined>();
+  const [showConflictDialog, setShowConflictDialog] = useState(false);
+  const [pendingCards, setPendingCards] = useState<CreateCard[]>([]);
+
+  const numCols = layout === '6x3' ? 6 : 3;
+  const [cells, setCells] = useState<CellForm[][]>(buildEmptyGrid(3));
 
   const [defaultSetName, setDefaultSetName] = useState('');
   const [defaultYear, setDefaultYear] = useState('');
   const [defaultManufacturer, setDefaultManufacturer] = useState('');
+
+  const handleLayoutChange = (newLayout: PageLayout) => {
+    const newCols = newLayout === '6x3' ? 6 : 3;
+    setLayout(newLayout);
+    setCells(buildEmptyGrid(newCols));
+    setPageImage(null);
+    setPageImagePreview(null);
+  };
 
   const updateCell = (row: number, col: number, field: keyof CellForm, value: string) => {
     setCells(prev => {
@@ -78,19 +102,108 @@ export default function BulkEntry() {
     toast.success('Defaults applied to empty fields');
   };
 
+  const handleScanWithAi = async () => {
+    if (!pageImage) {
+      toast.error('Upload a page photo first');
+      return;
+    }
+    setScanning(true);
+    try {
+      const response = await aiApi.identifyPage(pageImage, layout);
+      const result = response.result;
+      updateTokenUsage(response.tokenUsage);
+      setCells(prev => {
+        const updated = prev.map(r => r.map(c => ({ ...c })));
+        for (const item of result.cards) {
+          const ri = item.row - 1;
+          const ci = item.column - 1;
+          if (ri >= 0 && ri < 3 && ci >= 0 && ci < numCols && !item.isEmpty && item.card) {
+            updated[ri][ci] = {
+              playerName: item.card.playerName || '',
+              year: item.card.year?.toString() || '',
+              setName: item.card.setName || '',
+              cardNumber: item.card.cardNumber || '',
+              team: item.card.team || '',
+              estimatedCondition: item.card.estimatedCondition || 'UNKNOWN',
+              valueRangeLow: item.card.valueRangeLow?.toString() || '',
+              valueRangeHigh: item.card.valueRangeHigh?.toString() || '',
+              notes: item.card.notes || '',
+            };
+          }
+        }
+        return updated;
+      });
+      const identified = result.cards.filter(c => !c.isEmpty).length;
+      toast.success(`AI identified ${identified} card${identified !== 1 ? 's' : ''} on this page`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'AI page scan failed';
+      toast.error(msg);
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const handleSaveAll = async () => {
+    const cards = buildCardList();
+    if (cards.length === 0) {
+      toast.error('Enter at least one card (player name required)');
+      return;
+    }
+
+    // Check for page conflicts before saving
+    const targetPages = [...new Set(cards.map(c => c.pageNumber))];
+    try {
+      const conflict = await cardApi.checkPageConflicts(binderNumber, targetPages);
+      if (conflict.hasConflicts) {
+        setConflictCards(conflict.conflictingCards);
+        setConflictSuggestion(conflict.suggestion);
+        setPendingCards(cards);
+        setShowConflictDialog(true);
+        return;
+      }
+    } catch {
+      // If conflict check fails, proceed anyway
+    }
+
+    await executeSave(cards);
+  };
+
+  const handleConflictUseSuggestion = (suggestion: NextAvailableSuggestion) => {
+    setShowConflictDialog(false);
+    setPageNumber(suggestion.pageNumber);
+    toast.success(`Page updated to ${suggestion.pageNumber}`);
+  };
+
+  const handleConflictOverwrite = async () => {
+    setShowConflictDialog(false);
+    const idsToUnassign = conflictCards.map(c => c.id);
+    try {
+      await cardApi.unassignCards(idsToUnassign);
+      toast.success(`${idsToUnassign.length} existing card${idsToUnassign.length !== 1 ? 's' : ''} unassigned`);
+    } catch {
+      toast.error('Failed to unassign existing cards');
+      return;
+    }
+    await executeSave(pendingCards);
+  };
+
+  const buildCardList = (): CreateCard[] => {
     const cards: CreateCard[] = [];
 
     for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 3; c++) {
+      for (let c = 0; c < numCols; c++) {
         const cell = cells[r][c];
         if (!cell.playerName.trim()) continue;
 
+        const isRightPage = layout === '6x3' && c >= 3;
+        const cardPageNumber = isRightPage ? pageNumber + 1 : pageNumber;
+        const cardColumn = isRightPage ? c - 2 : c + 1;
+
         cards.push({
           binderNumber,
-          pageNumber,
+          pageNumber: cardPageNumber,
           row: r + 1,
-          column: c + 1,
+          column: cardColumn,
           playerName: cell.playerName.trim(),
           year: parseInt(cell.year) || new Date().getFullYear(),
           setName: cell.setName.trim() || defaultSetName || 'Unknown',
@@ -105,16 +218,17 @@ export default function BulkEntry() {
         });
       }
     }
+    return cards;
+  };
 
-    if (cards.length === 0) {
-      toast.error('Enter at least one card (player name required)');
-      return;
-    }
-
+  const executeSave = async (cards: CreateCard[]) => {
     setSaving(true);
     try {
       if (pageImage) {
         await pageApi.uploadPageImage(binderNumber, pageNumber, pageImage);
+        if (layout === '6x3') {
+          await pageApi.uploadPageImage(binderNumber, pageNumber + 1, pageImage);
+        }
       }
 
       const created = await cardApi.bulkCreate(cards);
@@ -131,11 +245,36 @@ export default function BulkEntry() {
   return (
     <div className="page bulk-entry-page">
       <h1 className="page-title">Bulk Entry</h1>
-      <p className="page-subtitle">Enter up to 9 cards from a single binder page at once.</p>
+      <p className="page-subtitle">
+        {layout === '6x3'
+          ? `Enter up to 18 cards from two consecutive binder pages (${pageNumber} & ${pageNumber + 1}).`
+          : 'Enter up to 9 cards from a single binder page at once.'}
+      </p>
 
       <div className="bulk-header">
         <div className="bulk-header-fields">
           <div className="form-row">
+            <div className="form-group">
+              <label>Layout</label>
+              <div className="layout-toggle">
+                <button
+                  type="button"
+                  className={`layout-btn ${layout === '3x3' ? 'active' : ''}`}
+                  onClick={() => handleLayoutChange('3x3')}
+                >
+                  <LayoutGrid size={16} />
+                  3×3
+                </button>
+                <button
+                  type="button"
+                  className={`layout-btn ${layout === '6x3' ? 'active' : ''}`}
+                  onClick={() => handleLayoutChange('6x3')}
+                >
+                  <Columns size={16} />
+                  6×3
+                </button>
+              </div>
+            </div>
             <div className="form-group">
               <label>Binder Number</label>
               <input
@@ -146,7 +285,7 @@ export default function BulkEntry() {
               />
             </div>
             <div className="form-group">
-              <label>Page Number</label>
+              <label>{layout === '6x3' ? 'Left Page Number' : 'Page Number'}</label>
               <input
                 type="number"
                 value={pageNumber}
@@ -211,16 +350,32 @@ export default function BulkEntry() {
               className="image-input"
             />
           </div>
+          {pageImage && (
+            <button
+              type="button"
+              className="btn btn-accent btn-ai"
+              onClick={handleScanWithAi}
+              disabled={scanning}
+            >
+              <Sparkles size={16} />
+              {scanning ? 'Scanning...' : 'Scan Page with AI'}
+            </button>
+          )}
+
         </div>
       </div>
 
       <div className="bulk-grid">
         {cells.map((row, ri) => (
-          <div key={ri} className="bulk-row">
-            {row.map((cell, ci) => (
-              <div key={ci} className="bulk-cell">
+          <div key={ri} className={`bulk-row ${layout === '6x3' ? 'bulk-row-6' : ''}`}>
+            {row.map((cell, ci) => {
+              const isRightPage = layout === '6x3' && ci >= 3;
+              const displayPage = isRightPage ? pageNumber + 1 : pageNumber;
+              const displayCol = isRightPage ? ci - 2 : ci + 1;
+              return (
+              <div key={ci} className={`bulk-cell ${layout === '6x3' && ci === 3 ? 'bulk-cell-divider' : ''}`}>
                 <div className="bulk-cell-header">
-                  <span>R{ri + 1} - C{ci + 1}</span>
+                  <span>{layout === '6x3' ? `P${displayPage} R${ri + 1}-C${displayCol}` : `R${ri + 1} - C${ci + 1}`}</span>
                 </div>
                 <div className="bulk-cell-fields">
                   <input
@@ -288,7 +443,8 @@ export default function BulkEntry() {
                   />
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         ))}
       </div>
@@ -306,6 +462,17 @@ export default function BulkEntry() {
           {saving ? 'Saving...' : 'Save All Cards'}
         </button>
       </div>
+
+      {showConflictDialog && (
+        <ConflictOverwriteDialog
+          mode="page"
+          conflictingCards={conflictCards}
+          suggestion={conflictSuggestion}
+          onCancel={() => setShowConflictDialog(false)}
+          onUseSuggestion={handleConflictUseSuggestion}
+          onOverwrite={handleConflictOverwrite}
+        />
+      )}
     </div>
   );
 }

@@ -29,6 +29,7 @@ export default function CollectionBrowser() {
   const manufacturer = searchParams.get('manufacturer') || '';
   const tags = searchParams.get('tags') || '';
   const isGraded = searchParams.get('isGraded') || '';
+  const isUnassigned = searchParams.get('isUnassigned') || '';
   const sortBy = searchParams.get('sortBy') || 'playerName';
   const sortDir = searchParams.get('sortDir') || 'asc';
   const pageNum = parseInt(searchParams.get('pageNum') || '1');
@@ -47,6 +48,7 @@ export default function CollectionBrowser() {
         manufacturer: manufacturer || undefined,
         tags: tags || undefined,
         isGraded: isGraded === 'true' ? true : isGraded === 'false' ? false : undefined,
+        isUnassigned: isUnassigned === 'true' ? true : isUnassigned === 'false' ? false : undefined,
         sortBy,
         sortDir,
         pageNum,
@@ -59,7 +61,7 @@ export default function CollectionBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, binderNumber, year, setName, team, manufacturer, tags, isGraded, sortBy, sortDir, pageNum]);
+  }, [debouncedSearch, binderNumber, year, setName, team, manufacturer, tags, isGraded, isUnassigned, sortBy, sortDir, pageNum]);
 
   useEffect(() => {
     fetchCards();
@@ -84,7 +86,7 @@ export default function CollectionBrowser() {
     setSearchParams({});
   };
 
-  const hasFilters = binderNumber || year || setName || team || manufacturer || tags || isGraded;
+  const hasFilters = binderNumber || year || setName || team || manufacturer || tags || isGraded || isUnassigned;
 
   return (
     <div className="page collection-page">
@@ -201,6 +203,13 @@ export default function CollectionBrowser() {
                 <option value="">All</option>
                 <option value="true">Graded Only</option>
                 <option value="false">Ungraded Only</option>
+              </select>
+            </div>
+            <div className="filter-group">
+              <label>Assignment</label>
+              <select value={isUnassigned} onChange={e => updateParam('isUnassigned', e.target.value)}>
+                <option value="">Assigned Only</option>
+                <option value="true">Unassigned Only</option>
               </select>
             </div>
           </div>
