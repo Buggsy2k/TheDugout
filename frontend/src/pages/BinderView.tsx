@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, RotateCw } from 'lucide-react';
 import { binderApi, pageApi } from '../services/api';
 import type { BinderDetail, Card } from '../types';
 import { formatCurrency, formatValueRange } from '../types';
@@ -15,6 +15,24 @@ export default function BinderView() {
   const [binder, setBinder] = useState<BinderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [flippedCards, setFlippedCards] = useState<Set<number>>(new Set());
+  const [showAllBacks, setShowAllBacks] = useState(false);
+
+  const toggleFlip = (cardId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFlippedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  };
+
+  const toggleAllBacks = () => {
+    const newShowAll = !showAllBacks;
+    setShowAllBacks(newShowAll);
+    setFlippedCards(new Set());
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -84,6 +102,15 @@ export default function BinderView() {
         {pageCards.length > 0 && (
           <span>Page value: {formatValueRange(pageValueLow, pageValueHigh)}</span>
         )}
+        {pageCards.some(c => c.backImagePath) && (
+          <button
+            className={`btn btn-sm${showAllBacks ? ' btn-accent' : ''}`}
+            onClick={toggleAllBacks}
+          >
+            <RotateCw size={14} />
+            {showAllBacks ? ' Show Fronts' : ' Show Backs'}
+          </button>
+        )}
       </div>
 
       <div className="binder-grid">
@@ -105,13 +132,26 @@ export default function BinderView() {
                 >
                   {card ? (
                     <div className="binder-cell-content">
-                      {card.imagePath ? (
-                        <img src={`${API_BASE}${card.imagePath}`} alt={card.playerName} loading="lazy" />
-                      ) : (
-                        <div className="binder-cell-text">
-                          <span className="binder-cell-name">{card.playerName}</span>
-                          <span className="binder-cell-year">{card.year} {card.setName}</span>
-                        </div>
+                      {(() => {
+                        const isFlipped = flippedCards.has(card.id) ? !showAllBacks : showAllBacks;
+                        const currentImage = isFlipped ? card.backImagePath : card.imagePath;
+                        return currentImage ? (
+                          <img src={`${API_BASE}${currentImage}`} alt={`${card.playerName}${isFlipped ? ' (back)' : ''}`} loading="lazy" />
+                        ) : (
+                          <div className="binder-cell-text">
+                            <span className="binder-cell-name">{card.playerName}</span>
+                            <span className="binder-cell-year">{card.year} {card.setName}</span>
+                          </div>
+                        );
+                      })()}
+                      {card.backImagePath && (
+                        <button
+                          className={`card-flip-btn${flippedCards.has(card.id) ? ' flipped' : ''}`}
+                          onClick={(e) => toggleFlip(card.id, e)}
+                          title={flippedCards.has(card.id) ? 'Show front' : 'Show back'}
+                        >
+                          <RotateCw size={14} />
+                        </button>
                       )}
                       <div className="binder-cell-overlay">
                         <span>{card.playerName}</span>

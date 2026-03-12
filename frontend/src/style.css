@@ -629,7 +629,8 @@ a:hover {
   z-index: 2;
 }
 
-.card-tile:hover .card-flip-btn {
+.card-tile:hover .card-flip-btn,
+.binder-cell:hover .card-flip-btn {
   opacity: 1;
 }
 
