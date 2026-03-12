@@ -35,19 +35,15 @@ public class AppDbContext : DbContext
                 .HasIndex(c => c.SearchVector)
                 .HasMethod("GIN");
 
-            // Relationship to Binder
-            entity.HasOne(c => c.Binder)
-                  .WithMany(b => b.Cards)
-                  .HasForeignKey(c => c.BinderNumber)
-                  .HasPrincipalKey(b => b.Id)
-                  .OnDelete(DeleteBehavior.SetNull)
-                  .IsRequired(false);
+            // Relationship to Binder (no FK constraint — BinderNumber is a logical grouping, not a Binder PK)
+            entity.Ignore(c => c.Binder);
         });
 
         // Binder configuration
         modelBuilder.Entity<Binder>(entity =>
         {
             entity.HasIndex(b => b.Name);
+            entity.Ignore(b => b.Cards);
         });
     }
 

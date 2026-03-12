@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Trash2, ArrowLeft, Upload, Sparkles } from 'lucide-react';
+import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw } from 'lucide-react';
 import { cardApi, binderApi, aiApi } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
@@ -46,6 +46,8 @@ export default function CardDetail() {
   const [saving, setSaving] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [showBack, setShowBack] = useState(false);
+  const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
   const [identifying, setIdentifying] = useState(false);
   const { updateTokenUsage } = useTokenUsage();
 
@@ -101,6 +103,9 @@ export default function CardDetail() {
         });
         if (card.imagePath) {
           setImagePreview(`${API_BASE}${card.imagePath}`);
+        }
+        if (card.backImagePath) {
+          setBackImagePreview(`${API_BASE}${card.backImagePath}`);
         }
       })
       .catch(() => toast.error('Card not found'))
@@ -271,22 +276,38 @@ export default function CardDetail() {
           {/* Image section */}
           <div className="card-form-image">
             <div className="image-upload-area">
-              {imagePreview ? (
-                <img src={imagePreview} alt="Card preview" className="image-preview" />
+              {(showBack ? backImagePreview : imagePreview) ? (
+                <img
+                  src={(showBack ? backImagePreview : imagePreview)!}
+                  alt={`Card preview${showBack ? ' (back)' : ''}`}
+                  className="image-preview"
+                />
               ) : (
                 <div className="image-placeholder">
                   <Upload size={32} />
-                  <span>Upload Image</span>
+                  <span>{showBack ? 'No Back Image' : 'Upload Image'}</span>
                 </div>
               )}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                onChange={handleImageChange}
-                className="image-input"
-              />
+              {!showBack && (
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={handleImageChange}
+                  className="image-input"
+                />
+              )}
             </div>
-            {imageFile && (
+            {(imagePreview || backImagePreview) && (
+              <button
+                type="button"
+                className={`btn btn-sm btn-secondary card-detail-flip-btn${showBack ? ' flipped' : ''}`}
+                onClick={() => setShowBack(prev => !prev)}
+              >
+                <RotateCw size={14} />
+                {showBack ? 'Show Front' : 'Show Back'}
+              </button>
+            )}
+            {imageFile && !showBack && (
               <button
                 type="button"
                 className="btn btn-accent btn-ai"

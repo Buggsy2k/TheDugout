@@ -337,6 +337,7 @@ public class CardService
         ValueRangeLow = c.ValueRangeLow,
         ValueRangeHigh = c.ValueRangeHigh,
         ImagePath = c.ImagePath,
+        BackImagePath = c.BackImagePath,
         SourceImagePath = c.SourceImagePath,
         Notes = c.Notes,
         Tags = c.Tags,
@@ -475,5 +476,23 @@ public class CardService
         // Page is full, find next available page
         var nextPage = await FindNextAvailablePageAsync(binderNumber, pageNumber + 1);
         return (1, 1, nextPage);
+    }
+
+    public async Task AssignExtractedImagesAsync(List<CardImageAssignment> assignments)
+    {
+        var cardIds = assignments.Select(a => a.CardId).ToList();
+        var cards = await _db.Cards.Where(c => cardIds.Contains(c.Id)).ToListAsync();
+
+        foreach (var card in cards)
+        {
+            var assignment = assignments.First(a => a.CardId == card.Id);
+            if (!string.IsNullOrEmpty(assignment.FrontImagePath))
+                card.ImagePath = assignment.FrontImagePath;
+            if (!string.IsNullOrEmpty(assignment.BackImagePath))
+                card.BackImagePath = assignment.BackImagePath;
+            card.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
     }
 }

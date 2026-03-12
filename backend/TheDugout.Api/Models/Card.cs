@@ -59,6 +59,9 @@ public class Card
     public string? ImagePath { get; set; }
 
     [MaxLength(500)]
+    public string? BackImagePath { get; set; }
+
+    [MaxLength(500)]
     public string? SourceImagePath { get; set; }
 
     [MaxLength(1000)]

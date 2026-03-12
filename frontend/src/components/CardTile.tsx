@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { RotateCw } from 'lucide-react';
 import type { Card } from '../types';
 import { formatValueRange, formatLocation, getConditionInfo } from '../types';
 import ConditionBadge from './ConditionBadge';
@@ -11,20 +13,37 @@ const API_BASE = 'http://localhost:5137';
 
 export default function CardTile({ card }: CardTileProps) {
   const navigate = useNavigate();
+  const [showBack, setShowBack] = useState(false);
+  const hasBack = !!card.backImagePath;
+  const currentImage = showBack ? card.backImagePath : card.imagePath;
+
+  const handleFlip = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowBack(prev => !prev);
+  };
 
   return (
     <div className="card-tile" onClick={() => navigate(`/cards/${card.id}`)}>
       <div className="card-tile-image">
-        {card.imagePath ? (
+        {currentImage ? (
           <img
-            src={`${API_BASE}${card.imagePath}`}
-            alt={card.playerName}
+            src={`${API_BASE}${currentImage}`}
+            alt={`${card.playerName}${showBack ? ' (back)' : ''}`}
             loading="lazy"
           />
         ) : (
           <div className="card-tile-placeholder">
             <span>⚾</span>
           </div>
+        )}
+        {hasBack && (
+          <button
+            className={`card-flip-btn${showBack ? ' flipped' : ''}`}
+            onClick={handleFlip}
+            title={showBack ? 'Show front' : 'Show back'}
+          >
+            <RotateCw size={14} />
+          </button>
         )}
       </div>
       <div className="card-tile-info">

@@ -122,6 +122,69 @@ Include ALL 18 positions (rows 1-3, columns 1-6) even if some are empty.
 Set confidence between 0.0 and 1.0 for each identified card.
 If a pocket has a card but you can't identify it, set playerName to ""Unknown"" with low confidence.";
 
+    private const string BackScanPrompt3x3 = @"You are an expert baseball card identifier. This image shows the BACK side of a binder page with 3 rows × 3 columns of baseball cards.
+
+IMPORTANT: Because this is the BACK of the page, the columns are MIRRORED compared to the front.
+What was column 1 on the front is now column 3 in this image, and vice versa.
+Return the positions as they appear on the FRONT (i.e. already un-mirrored):
+- Image left column → front column 3
+- Image center column → front column 2
+- Image right column → front column 1
+
+For each card back, extract the card number, any statistics, biographical info, or other details visible.
+
+Return ONLY valid JSON (no markdown fences) in this format:
+{
+  ""cards"": [
+    {
+      ""row"": 1,
+      ""column"": 1,
+      ""isEmpty"": false,
+      ""card"": {
+        ""playerName"": ""player name if visible"",
+        ""cardNumber"": ""card number from back"",
+        ""team"": ""team if visible"",
+        ""manufacturer"": ""manufacturer if visible"",
+        ""notes"": ""any interesting info from the back (stats, bio, copyright year)"",
+        ""year"": null
+      }
+    }
+  ]
+}
+
+Include ALL 9 positions (rows 1-3, columns 1-3). Set isEmpty=true for empty pockets.";
+
+    private const string BackScanPrompt6x3 = @"You are an expert baseball card identifier. This image shows the BACK side of TWO binder pages side by side (an open album spread), each with 3 rows × 3 columns. Together they form a 3-row × 6-column grid.
+
+IMPORTANT: Because this is the BACK of the pages, the columns are MIRRORED compared to the front.
+The left page in this image was the RIGHT page on the front, and vice versa.
+Return positions as they map to the FRONT side:
+- Image columns 1-3 (left page backs) → front columns 4-6 (but reversed: img col 1→front col 6, img col 2→front col 5, img col 3→front col 4)
+- Image columns 4-6 (right page backs) → front columns 1-3 (but reversed: img col 4→front col 3, img col 5→front col 2, img col 6→front col 1)
+
+For each card back, extract the card number, statistics, biographical info, or other details visible.
+
+Return ONLY valid JSON (no markdown fences) in this format:
+{
+  ""cards"": [
+    {
+      ""row"": 1,
+      ""column"": 1,
+      ""isEmpty"": false,
+      ""card"": {
+        ""playerName"": ""player name if visible"",
+        ""cardNumber"": ""card number from back"",
+        ""team"": ""team if visible"",
+        ""manufacturer"": ""manufacturer if visible"",
+        ""notes"": ""any interesting info from the back (stats, bio, copyright year)"",
+        ""year"": null
+      }
+    }
+  ]
+}
+
+Include ALL 18 positions (rows 1-3, columns 1-6). Set isEmpty=true for empty pockets.";
+
     public ClaudeVisionService(AnthropicClient client, ILogger<ClaudeVisionService> logger)
     {
         _client = client;
@@ -258,6 +321,76 @@ If a pocket has a card but you can't identify it, set playerName to ""Unknown"" 
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error identifying page with Claude Vision");
+            throw;
+        }
+    }
+
+    public async Task<AiResponse<PageIdentificationResult>?> IdentifyPageBackAsync(byte[] imageBytes, string mediaType, string layout = "3x3")
+    {
+        try
+        {
+            var is6x3 = string.Equals(layout, "6x3", StringComparison.OrdinalIgnoreCase);
+            var prompt = is6x3 ? BackScanPrompt6x3 : BackScanPrompt3x3;
+            var userText = is6x3
+                ? "Extract card numbers and details from the backs of these two side-by-side binder pages (6 columns × 3 rows)."
+                : "Extract card numbers and details from the backs of this binder page.";
+
+            var base64Image = Convert.ToBase64String(imageBytes);
+
+            var messages = new List<Message>
+            {
+                new Message
+                {
+                    Role = RoleType.User,
+                    Content = new List<ContentBase>
+                    {
+                        new ImageContent
+                        {
+                            Source = new ImageSource
+                            {
+                                MediaType = mediaType,
+                                Data = base64Image
+                            }
+                        },
+                        new TextContent { Text = userText }
+                    }
+                }
+            };
+
+            var parameters = new MessageParameters
+            {
+                Messages = messages,
+                Model = Anthropic.SDK.Constants.AnthropicModels.Claude4Sonnet,
+                MaxTokens = is6x3 ? 4096 : 2048,
+                System = new List<SystemMessage>
+                {
+                    new SystemMessage(prompt)
+                },
+                Temperature = 0.1m
+            };
+
+            var response = await _client.Messages.GetClaudeMessageAsync(parameters);
+            var responseText = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
+
+            if (string.IsNullOrWhiteSpace(responseText))
+            {
+                _logger.LogWarning("Empty response from Claude for page back identification");
+                return null;
+            }
+
+            var json = ExtractJson(responseText);
+            var result = JsonSerializer.Deserialize<PageIdentificationResult>(json, JsonOpts);
+            if (result == null) return null;
+
+            return new AiResponse<PageIdentificationResult>
+            {
+                Result = result,
+                TokenUsage = BuildTokenUsage(response)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error identifying page backs with Claude Vision");
             throw;
         }
     }

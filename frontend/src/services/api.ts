@@ -14,6 +14,8 @@ import type {
   CardIdentificationResult,
   PageIdentificationResult,
   ConflictCheckResult,
+  ExtractedCardImage,
+  CardImageAssignment,
 } from '../types';
 
 const api = axios.create({
@@ -112,21 +114,37 @@ export const pageApi = {
       params: { binderNumber, pageNumber },
     }).then(r => r.data);
   },
+
+  extractCards(file: File, layout: '3x3' | '6x3', binderNumber: number, pageNumber: number, side: 'front' | 'back' = 'front'): Promise<ExtractedCardImage[]> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/pages/extract-cards', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { layout, binderNumber, pageNumber, side },
+    }).then(r => r.data);
+  },
+
+  assignExtractedImages(assignments: CardImageAssignment[]): Promise<void> {
+    return api.post('/pages/assign-extracted-images', { assignments }).then(r => r.data);
+  },
 };
 
 // AI API
 export const aiApi = {
   identifyCard(file: File): Promise<AiResponse<CardIdentificationResult>> {
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('file', file);
     return api.post('/ai/identify-card', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data);
   },
 
-  identifyPage(file: File, layout: '3x3' | '6x3' = '3x3'): Promise<AiResponse<PageIdentificationResult>> {
+  identifyPage(file: File, layout: '3x3' | '6x3' = '3x3', backFile?: File): Promise<AiResponse<PageIdentificationResult>> {
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('file', file);
+    if (backFile) {
+      formData.append('backFile', backFile);
+    }
     return api.post('/ai/identify-page', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       params: { layout },

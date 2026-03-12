@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Upload, Sparkles, LayoutGrid, Columns } from 'lucide-react';
+import { Upload, Sparkles, LayoutGrid, Columns, RotateCw } from 'lucide-react';
 import { cardApi, pageApi, aiApi } from '../services/api';
-import type { CreateCard, Card, NextAvailableSuggestion } from '../types';
+import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import { CONDITIONS } from '../types';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -47,6 +47,8 @@ export default function BulkEntry() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageImage, setPageImage] = useState<File | null>(null);
   const [pageImagePreview, setPageImagePreview] = useState<string | null>(null);
+  const [backImage, setBackImage] = useState<File | null>(null);
+  const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const { updateTokenUsage } = useTokenUsage();
@@ -70,6 +72,8 @@ export default function BulkEntry() {
     setCells(buildEmptyGrid(newCols));
     setPageImage(null);
     setPageImagePreview(null);
+    setBackImage(null);
+    setBackImagePreview(null);
   };
 
   const updateCell = (row: number, col: number, field: keyof CellForm, value: string) => {
@@ -86,6 +90,15 @@ export default function BulkEntry() {
     setPageImage(file);
     const reader = new FileReader();
     reader.onload = () => setPageImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleBackImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBackImage(file);
+    const reader = new FileReader();
+    reader.onload = () => setBackImagePreview(reader.result as string);
     reader.readAsDataURL(file);
   };
 
@@ -109,7 +122,7 @@ export default function BulkEntry() {
     }
     setScanning(true);
     try {
-      const response = await aiApi.identifyPage(pageImage, layout);
+      const response = await aiApi.identifyPage(pageImage, layout, backImage ?? undefined);
       const result = response.result;
       updateTokenUsage(response.tokenUsage);
       setCells(prev => {
@@ -232,7 +245,56 @@ export default function BulkEntry() {
       }
 
       const created = await cardApi.bulkCreate(cards);
-      toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created!`);
+
+      // Extract individual card images from page photos
+      if (pageImage && created.length > 0) {
+        try {
+          const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front');
+          let backExtracts: ExtractedCardImage[] = [];
+          if (backImage) {
+            backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back');
+          }
+
+          const assignments: CardImageAssignment[] = [];
+          // Number of columns per physical page (always 3 for a standard binder page)
+          const colsPerPage = 3;
+          for (const card of created) {
+            // Match extracted images to created cards by row/column
+            // For 6x3, right-page cards (page+1) have cols 1-3 but were extracted as cols 4-6
+            const gridCol = card.pageNumber === pageNumber + 1 && layout === '6x3'
+              ? card.column + 3
+              : card.column;
+
+            const front = frontExtracts.find(e => e.row === card.row && e.column === gridCol);
+
+            // Back photo is a mirror of the front — columns are reversed within each page
+            // e.g. for 3x3: front col 1 = back col 3, front col 2 = back col 2
+            // For 6x3: mirror within each 3-col half (cols 1-3 and cols 4-6 independently)
+            const pageColOffset = gridCol > colsPerPage ? colsPerPage : 0;
+            const localCol = gridCol - pageColOffset;
+            const mirroredCol = (colsPerPage + 1 - localCol) + pageColOffset;
+            const back = backExtracts.find(e => e.row === card.row && e.column === mirroredCol);
+            if (front || back) {
+              assignments.push({
+                cardId: card.id,
+                frontImagePath: front?.imagePath,
+                backImagePath: back?.imagePath,
+              });
+            }
+          }
+
+          if (assignments.length > 0) {
+            await pageApi.assignExtractedImages(assignments);
+          }
+          toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created with images!`);
+        } catch {
+          // Image extraction failed but cards were created successfully
+          toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created (image extraction failed)`);
+        }
+      } else {
+        toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created!`);
+      }
+
       navigate('/collection');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save cards';
@@ -333,14 +395,14 @@ export default function BulkEntry() {
         </div>
 
         <div className="bulk-header-image">
-          <label>Page Photo (optional)</label>
+          <label>Page Photo — Front (optional)</label>
           <div className="page-image-upload">
             {pageImagePreview ? (
               <img src={pageImagePreview} alt="Page" className="page-image-preview" />
             ) : (
               <div className="page-image-placeholder">
                 <Upload size={24} />
-                <span>Upload page photo</span>
+                <span>Upload front photo</span>
               </div>
             )}
             <input
@@ -361,7 +423,23 @@ export default function BulkEntry() {
               {scanning ? 'Scanning...' : 'Scan Page with AI'}
             </button>
           )}
-
+          <label style={{ marginTop: '0.75rem' }}>Page Photo — Back (optional)</label>
+          <div className="page-image-upload">
+            {backImagePreview ? (
+              <img src={backImagePreview} alt="Back" className="page-image-preview" />
+            ) : (
+              <div className="page-image-placeholder">
+                <RotateCw size={24} />
+                <span>Upload back photo</span>
+              </div>
+            )}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleBackImageChange}
+              className="image-input"
+            />
+          </div>
         </div>
       </div>
 

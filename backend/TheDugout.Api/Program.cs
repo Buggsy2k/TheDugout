@@ -18,6 +18,7 @@ builder.Services.AddScoped<ClaudeVisionService>();
 // Services
 builder.Services.AddScoped<CardService>();
 builder.Services.AddScoped<BinderService>();
+builder.Services.AddScoped<CardImageExtractionService>();
 
 // Controllers
 builder.Services.AddControllers();

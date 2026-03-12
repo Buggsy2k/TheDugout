@@ -15,6 +15,7 @@ export interface Card {
   valueRangeLow?: number;
   valueRangeHigh?: number;
   imagePath?: string;
+  backImagePath?: string;
   sourceImagePath?: string;
   notes?: string;
   tags?: string;
@@ -116,6 +117,19 @@ export interface NextAvailableSuggestion {
   pageNumber: number;
   row?: number;
   column?: number;
+}
+
+export interface ExtractedCardImage {
+  row: number;
+  column: number;
+  imagePath: string;
+  side: 'front' | 'back';
+}
+
+export interface CardImageAssignment {
+  cardId: number;
+  frontImagePath?: string;
+  backImagePath?: string;
 }
 
 export interface CreateBinder {

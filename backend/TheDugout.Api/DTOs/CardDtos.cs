@@ -18,6 +18,7 @@ public class CardDto
     public decimal? ValueRangeLow { get; set; }
     public decimal? ValueRangeHigh { get; set; }
     public string? ImagePath { get; set; }
+    public string? BackImagePath { get; set; }
     public string? SourceImagePath { get; set; }
     public string? Notes { get; set; }
     public string? Tags { get; set; }
@@ -161,4 +162,16 @@ public class NextAvailableSuggestion
 public class UnassignRequest
 {
     public List<int> CardIds { get; set; } = new();
+}
+
+public class AssignExtractedImagesRequest
+{
+    public List<CardImageAssignment> Assignments { get; set; } = new();
+}
+
+public class CardImageAssignment
+{
+    public int CardId { get; set; }
+    public string? FrontImagePath { get; set; }
+    public string? BackImagePath { get; set; }
 }

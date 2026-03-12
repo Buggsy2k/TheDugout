@@ -16,30 +16,37 @@ public class BinderService
 
     public async Task<List<BinderDto>> GetAllBindersAsync()
     {
-        return await _db.Binders
-            .Include(b => b.Cards)
-            .Select(b => new BinderDto
+        var binders = await _db.Binders.OrderBy(b => b.Id).ToListAsync();
+        var result = new List<BinderDto>();
+
+        foreach (var b in binders)
+        {
+            var cards = _db.Cards.Where(c => c.BinderNumber == b.Id && !c.IsUnassigned);
+            result.Add(new BinderDto
             {
                 Id = b.Id,
                 Name = b.Name,
                 Description = b.Description,
                 TotalPages = b.TotalPages,
                 CreatedAt = b.CreatedAt,
-                CardCount = b.Cards.Count,
-                TotalValueLow = b.Cards.Sum(c => c.ValueRangeLow ?? 0),
-                TotalValueHigh = b.Cards.Sum(c => c.ValueRangeHigh ?? 0)
-            })
-            .OrderBy(b => b.Id)
-            .ToListAsync();
+                CardCount = await cards.CountAsync(),
+                TotalValueLow = await cards.SumAsync(c => c.ValueRangeLow ?? 0),
+                TotalValueHigh = await cards.SumAsync(c => c.ValueRangeHigh ?? 0)
+            });
+        }
+
+        return result;
     }
 
     public async Task<BinderDetailDto?> GetBinderByIdAsync(int id)
     {
-        var binder = await _db.Binders
-            .Include(b => b.Cards)
-            .FirstOrDefaultAsync(b => b.Id == id);
-
+        var binder = await _db.Binders.FirstOrDefaultAsync(b => b.Id == id);
         if (binder == null) return null;
+
+        var cards = await _db.Cards
+            .Where(c => c.BinderNumber == binder.Id && !c.IsUnassigned)
+            .OrderBy(c => c.PageNumber).ThenBy(c => c.Row).ThenBy(c => c.Column)
+            .ToListAsync();
 
         return new BinderDetailDto
         {
@@ -48,11 +55,10 @@ public class BinderService
             Description = binder.Description,
             TotalPages = binder.TotalPages,
             CreatedAt = binder.CreatedAt,
-            CardCount = binder.Cards.Count,
-            TotalValueLow = binder.Cards.Sum(c => c.ValueRangeLow ?? 0),
-            TotalValueHigh = binder.Cards.Sum(c => c.ValueRangeHigh ?? 0),
-            Cards = binder.Cards.OrderBy(c => c.PageNumber).ThenBy(c => c.Row).ThenBy(c => c.Column)
-                .Select(c => new CardDto
+            CardCount = cards.Count,
+            TotalValueLow = cards.Sum(c => c.ValueRangeLow ?? 0),
+            TotalValueHigh = cards.Sum(c => c.ValueRangeHigh ?? 0),
+            Cards = cards.Select(c => new CardDto
                 {
                     Id = c.Id,
                     BinderNumber = c.BinderNumber,
@@ -70,6 +76,7 @@ public class BinderService
                     ValueRangeLow = c.ValueRangeLow,
                     ValueRangeHigh = c.ValueRangeHigh,
                     ImagePath = c.ImagePath,
+                    BackImagePath = c.BackImagePath,
                     SourceImagePath = c.SourceImagePath,
                     Notes = c.Notes,
                     Tags = c.Tags,
@@ -110,7 +117,7 @@ public class BinderService
 
     public async Task<BinderDto?> UpdateBinderAsync(int id, UpdateBinderDto dto)
     {
-        var binder = await _db.Binders.Include(b => b.Cards).FirstOrDefaultAsync(b => b.Id == id);
+        var binder = await _db.Binders.FirstOrDefaultAsync(b => b.Id == id);
         if (binder == null) return null;
 
         binder.Name = dto.Name;
@@ -119,6 +126,7 @@ public class BinderService
 
         await _db.SaveChangesAsync();
 
+        var cards = _db.Cards.Where(c => c.BinderNumber == binder.Id && !c.IsUnassigned);
         return new BinderDto
         {
             Id = binder.Id,
@@ -126,20 +134,21 @@ public class BinderService
             Description = binder.Description,
             TotalPages = binder.TotalPages,
             CreatedAt = binder.CreatedAt,
-            CardCount = binder.Cards.Count,
-            TotalValueLow = binder.Cards.Sum(c => c.ValueRangeLow ?? 0),
-            TotalValueHigh = binder.Cards.Sum(c => c.ValueRangeHigh ?? 0)
+            CardCount = await cards.CountAsync(),
+            TotalValueLow = await cards.SumAsync(c => c.ValueRangeLow ?? 0),
+            TotalValueHigh = await cards.SumAsync(c => c.ValueRangeHigh ?? 0)
         };
     }
 
     public async Task<bool> DeleteBinderAsync(int id, bool cascade = false)
     {
-        var binder = await _db.Binders.Include(b => b.Cards).FirstOrDefaultAsync(b => b.Id == id);
+        var binder = await _db.Binders.FirstOrDefaultAsync(b => b.Id == id);
         if (binder == null) return false;
 
         if (cascade)
         {
-            _db.Cards.RemoveRange(binder.Cards);
+            var cards = await _db.Cards.Where(c => c.BinderNumber == binder.Id).ToListAsync();
+            _db.Cards.RemoveRange(cards);
         }
 
         _db.Binders.Remove(binder);
