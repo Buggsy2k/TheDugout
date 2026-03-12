@@ -75,6 +75,10 @@ export const cardApi = {
   unassignCards(cardIds: number[]): Promise<Card[]> {
     return api.post('/cards/unassign', { cardIds }).then(r => r.data);
   },
+
+  bulkDeleteCards(cardIds: number[]): Promise<{ deletedCount: number }> {
+    return api.post('/cards/bulk-delete', { cardIds }).then(r => r.data);
+  },
 };
 
 // Binders API

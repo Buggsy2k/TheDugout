@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Upload, Sparkles, LayoutGrid, Columns, RotateCw } from 'lucide-react';
-import { cardApi, pageApi, aiApi } from '../services/api';
+import { cardApi, pageApi, aiApi, binderApi } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import { CONDITIONS } from '../types';
 import toast from 'react-hot-toast';
@@ -65,6 +65,47 @@ export default function BulkEntry() {
   const [defaultSetName, setDefaultSetName] = useState('');
   const [defaultYear, setDefaultYear] = useState('');
   const [defaultManufacturer, setDefaultManufacturer] = useState('');
+
+  const [binderTotalPages, setBinderTotalPages] = useState<number | null>(null);
+  const [binderAtCapacity, setBinderAtCapacity] = useState(false);
+  const isInitialMount = useRef(true);
+
+  // Auto-update page number when binder number changes
+  useEffect(() => {
+    // Skip the initial mount so we don't override the default page 1
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const binder = await binderApi.getBinder(binderNumber);
+        const maxPage = binder.cards.length > 0
+          ? Math.max(...binder.cards.map(c => c.pageNumber))
+          : 0;
+        const nextPage = maxPage + 1;
+        const total = binder.totalPages ?? null;
+        setBinderTotalPages(total);
+
+        if (total && nextPage > total) {
+          setPageNumber(maxPage || 1);
+          setBinderAtCapacity(true);
+          toast('This binder is full — all pages are in use', { icon: '⚠️' });
+        } else {
+          setPageNumber(nextPage);
+          setBinderAtCapacity(false);
+        }
+      } catch {
+        // Binder doesn't exist yet — reset to page 1
+        setBinderTotalPages(null);
+        setBinderAtCapacity(false);
+        setPageNumber(1);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [binderNumber]);
 
   const handleLayoutChange = (newLayout: PageLayout) => {
     const newCols = newLayout === '6x3' ? 6 : 3;
@@ -354,6 +395,13 @@ export default function BulkEntry() {
                 onChange={e => setPageNumber(parseInt(e.target.value) || 1)}
                 min={1}
               />
+              {binderTotalPages && (
+                <small className={`page-capacity-hint ${binderAtCapacity ? 'at-capacity' : ''}`}>
+                  {binderAtCapacity
+                    ? `Binder full (${binderTotalPages} pages)`
+                    : `of ${binderTotalPages} pages`}
+                </small>
+              )}
             </div>
           </div>
 

@@ -133,4 +133,17 @@ public class CardsController : ControllerBase
         var unassigned = await _cardService.UnassignCardsAsync(request.CardIds);
         return Ok(unassigned);
     }
+
+    [HttpPost("bulk-delete")]
+    public async Task<ActionResult<BulkDeleteResult>> BulkDeleteCards([FromBody] BulkDeleteRequest request)
+    {
+        if (request.CardIds == null || request.CardIds.Count == 0)
+            return BadRequest("No card IDs provided");
+
+        if (request.CardIds.Count > 100)
+            return BadRequest("Maximum 100 cards per bulk delete");
+
+        var deletedCount = await _cardService.BulkDeleteCardsAsync(request.CardIds);
+        return Ok(new BulkDeleteResult { DeletedCount = deletedCount });
+    }
 }

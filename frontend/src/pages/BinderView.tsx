@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Plus, RotateCw } from 'lucide-react';
-import { binderApi, pageApi } from '../services/api';
+import { ChevronLeft, ChevronRight, Plus, RotateCw, Minus, Trash2 } from 'lucide-react';
+import { binderApi, pageApi, cardApi } from '../services/api';
 import type { BinderDetail, Card } from '../types';
 import { formatCurrency, formatValueRange } from '../types';
 import ConditionBadge from '../components/ConditionBadge';
 import LoadingSkeleton from '../components/LoadingSkeleton';
+import toast from 'react-hot-toast';
 
 const API_BASE = 'http://localhost:5137';
 
@@ -17,6 +18,8 @@ export default function BinderView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [flippedCards, setFlippedCards] = useState<Set<number>>(new Set());
   const [showAllBacks, setShowAllBacks] = useState(false);
+  const [editingPages, setEditingPages] = useState(false);
+  const [pageCountInput, setPageCountInput] = useState('');
 
   const toggleFlip = (cardId: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -34,6 +37,47 @@ export default function BinderView() {
     setFlippedCards(new Set());
   };
 
+  const highestCardPage = Math.max(...(binder?.cards.map(c => c.pageNumber) || [1]), 1);
+
+  const updatePageCount = async (newCount: number) => {
+    if (!binder) return;
+    if (newCount < highestCardPage) {
+      toast.error(`Cannot go below page ${highestCardPage} — cards exist on that page`);
+      return;
+    }
+    if (newCount < 1) return;
+    try {
+      await binderApi.updateBinder(binder.id, {
+        name: binder.name,
+        description: binder.description,
+        totalPages: newCount,
+      });
+      setBinder(prev => prev ? { ...prev, totalPages: newCount } : prev);
+      toast.success(`Binder now has ${newCount} pages`);
+    } catch {
+      toast.error('Failed to update page count');
+    }
+  };
+
+  const handlePageCountSubmit = () => {
+    const val = parseInt(pageCountInput);
+    if (!isNaN(val) && val > 0) updatePageCount(val);
+    setEditingPages(false);
+  };
+
+  const deletePageCards = async () => {
+    if (pageCards.length === 0) return;
+    if (!confirm(`Delete all ${pageCards.length} card(s) on page ${currentPage}? This cannot be undone.`)) return;
+    try {
+      const ids = pageCards.map(c => c.id);
+      await cardApi.bulkDeleteCards(ids);
+      setBinder(prev => prev ? { ...prev, cards: prev.cards.filter(c => !ids.includes(c.id)) } : prev);
+      toast.success(`Deleted ${ids.length} card(s) from page ${currentPage}`);
+    } catch {
+      toast.error('Failed to delete cards');
+    }
+  };
+
   useEffect(() => {
     if (!id) return;
     setLoading(true);
@@ -43,7 +87,7 @@ export default function BinderView() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const maxPage = binder?.totalPages || Math.max(...(binder?.cards.map(c => c.pageNumber) || [1]), 1);
+  const maxPage = binder?.totalPages || highestCardPage;
 
   const pageCards = binder?.cards.filter(c => c.pageNumber === currentPage) || [];
 
@@ -77,6 +121,37 @@ export default function BinderView() {
       <div className="binder-header">
         <h1 className="page-title">{binder.name}</h1>
         {binder.description && <p className="binder-description">{binder.description}</p>}
+        <div className="binder-page-count">
+          <span>Total pages:</span>
+          {editingPages ? (
+            <input
+              type="number"
+              className="input input-sm binder-page-count-input"
+              value={pageCountInput}
+              min={highestCardPage}
+              autoFocus
+              onChange={e => setPageCountInput(e.target.value)}
+              onBlur={handlePageCountSubmit}
+              onKeyDown={e => { if (e.key === 'Enter') handlePageCountSubmit(); if (e.key === 'Escape') setEditingPages(false); }}
+            />
+          ) : (
+            <>
+              <button className="btn btn-icon btn-sm" onClick={() => updatePageCount(maxPage - 1)} disabled={maxPage <= 1}>
+                <Minus size={14} />
+              </button>
+              <span
+                className="binder-page-count-value"
+                onClick={() => { setPageCountInput(String(maxPage)); setEditingPages(true); }}
+                title="Click to edit"
+              >
+                {maxPage}
+              </span>
+              <button className="btn btn-icon btn-sm" onClick={() => updatePageCount(maxPage + 1)}>
+                <Plus size={14} />
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="page-nav">
@@ -109,6 +184,11 @@ export default function BinderView() {
           >
             <RotateCw size={14} />
             {showAllBacks ? ' Show Fronts' : ' Show Backs'}
+          </button>
+        )}
+        {pageCards.length > 0 && (
+          <button className="btn btn-sm btn-danger" onClick={deletePageCards}>
+            <Trash2 size={14} /> Clear Page
           </button>
         )}
       </div>

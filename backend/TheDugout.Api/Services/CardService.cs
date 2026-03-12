@@ -203,6 +203,19 @@ public class CardService
         return true;
     }
 
+    public async Task<int> BulkDeleteCardsAsync(List<int> cardIds)
+    {
+        var cards = await _db.Cards
+            .Where(c => cardIds.Contains(c.Id))
+            .ToListAsync();
+
+        if (cards.Count == 0) return 0;
+
+        _db.Cards.RemoveRange(cards);
+        await _db.SaveChangesAsync();
+        return cards.Count;
+    }
+
     public async Task<List<CardDto>> BulkCreateAsync(List<CreateCardDto> dtos)
     {
         var cards = dtos.Select(dto => new Card

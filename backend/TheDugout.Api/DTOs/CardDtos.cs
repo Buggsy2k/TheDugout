@@ -164,6 +164,16 @@ public class UnassignRequest
     public List<int> CardIds { get; set; } = new();
 }
 
+public class BulkDeleteRequest
+{
+    public List<int> CardIds { get; set; } = new();
+}
+
+public class BulkDeleteResult
+{
+    public int DeletedCount { get; set; }
+}
+
 public class AssignExtractedImagesRequest
 {
     public List<CardImageAssignment> Assignments { get; set; } = new();

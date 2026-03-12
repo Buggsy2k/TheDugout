@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Grid, List, Filter, X } from 'lucide-react';
+import { Grid, List, Filter, X, Trash2, CheckSquare, Square } from 'lucide-react';
 import { cardApi, binderApi } from '../services/api';
 import type { Card, CardQueryParams, PaginatedResult, Binder } from '../types';
 import { CONDITIONS } from '../types';
@@ -10,6 +10,7 @@ import LoadingSkeleton from '../components/LoadingSkeleton';
 import Pagination from '../components/Pagination';
 import ConditionBadge from '../components/ConditionBadge';
 import { formatValueRange, formatLocation } from '../types';
+import toast from 'react-hot-toast';
 
 export default function CollectionBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,6 +20,8 @@ export default function CollectionBrowser() {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useLocalStorage<'grid' | 'list'>('collection-view', 'grid');
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedCards, setSelectedCards] = useState<Set<number>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
 
   // Filter states from URL params
   const search = searchParams.get('search') || '';
@@ -88,6 +91,41 @@ export default function CollectionBrowser() {
 
   const hasFilters = binderNumber || year || setName || team || manufacturer || tags || isGraded || isUnassigned;
 
+  const toggleSelect = (cardId: number) => {
+    setSelectedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (!result) return;
+    const allOnPage = result.items.map(c => c.id);
+    const allSelected = allOnPage.every(id => selectedCards.has(id));
+    setSelectedCards(prev => {
+      const next = new Set(prev);
+      allOnPage.forEach(id => allSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    if (selectedCards.size === 0) return;
+    if (!confirm(`Delete ${selectedCards.size} selected card(s)? This cannot be undone.`)) return;
+    try {
+      const ids = Array.from(selectedCards);
+      await cardApi.bulkDeleteCards(ids);
+      toast.success(`Deleted ${ids.length} card(s)`);
+      setSelectedCards(new Set());
+      setSelectMode(false);
+      fetchCards();
+    } catch {
+      toast.error('Failed to delete cards');
+    }
+  };
+
   return (
     <div className="page collection-page">
       <div className="collection-header">
@@ -137,8 +175,29 @@ export default function CollectionBrowser() {
           <button className="btn btn-sm btn-primary" onClick={() => navigate('/cards/new')}>
             + Add Card
           </button>
+          <button
+            className={`btn btn-sm${selectMode ? ' btn-accent' : ' btn-secondary'}`}
+            onClick={() => { setSelectMode(!selectMode); setSelectedCards(new Set()); }}
+          >
+            <CheckSquare size={16} /> Select
+          </button>
         </div>
       </div>
+
+      {selectMode && (
+        <div className="selection-bar">
+          <button className="btn btn-sm btn-secondary" onClick={toggleSelectAll}>
+            {result && result.items.every(c => selectedCards.has(c.id)) ? <CheckSquare size={14} /> : <Square size={14} />}
+            {' '}Select All on Page
+          </button>
+          <span>{selectedCards.size} selected</span>
+          {selectedCards.size > 0 && (
+            <button className="btn btn-sm btn-danger" onClick={deleteSelected}>
+              <Trash2 size={14} /> Delete Selected
+            </button>
+          )}
+        </div>
+      )}
 
       {showFilters && (
         <div className="filters-panel">
@@ -230,13 +289,21 @@ export default function CollectionBrowser() {
           {viewMode === 'grid' ? (
             <div className="card-grid">
               {result.items.map(card => (
-                <CardTile key={card.id} card={card} />
+                <div key={card.id} className={`card-grid-item${selectMode && selectedCards.has(card.id) ? ' selected' : ''}`}>
+                  {selectMode && (
+                    <button className="card-select-btn" onClick={() => toggleSelect(card.id)}>
+                      {selectedCards.has(card.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                    </button>
+                  )}
+                  <CardTile card={card} />
+                </div>
               ))}
             </div>
           ) : (
             <table className="card-table">
               <thead>
                 <tr>
+                  {selectMode && <th className="select-col"></th>}
                   <th>Player</th>
                   <th>Year</th>
                   <th>Set</th>
@@ -248,7 +315,13 @@ export default function CollectionBrowser() {
               </thead>
               <tbody>
                 {result.items.map(card => (
-                  <tr key={card.id} onClick={() => navigate(`/cards/${card.id}`)} className="clickable-row">
+                  <tr key={card.id} className={`clickable-row${selectMode && selectedCards.has(card.id) ? ' selected' : ''}`}
+                    onClick={() => selectMode ? toggleSelect(card.id) : navigate(`/cards/${card.id}`)}>
+                    {selectMode && (
+                      <td className="select-col">
+                        {selectedCards.has(card.id) ? <CheckSquare size={16} /> : <Square size={16} />}
+                      </td>
+                    )}
                     <td className="player-cell">{card.playerName}</td>
                     <td>{card.year}</td>
                     <td>{card.setName}</td>
