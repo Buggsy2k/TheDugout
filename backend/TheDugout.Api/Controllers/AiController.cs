@@ -11,10 +11,35 @@ public class AiController : ControllerBase
     private readonly ClaudeVisionService _visionService;
     private readonly ILogger<AiController> _logger;
 
+    private static readonly Dictionary<string, string> AllowedImageTypes = new()
+    {
+        [".jpg"] = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".png"] = "image/png",
+        [".webp"] = "image/webp",
+        [".gif"] = "image/gif",
+        [".tif"] = "image/tiff",
+        [".tiff"] = "image/tiff"
+    };
+
     public AiController(ClaudeVisionService visionService, ILogger<AiController> logger)
     {
         _visionService = visionService;
         _logger = logger;
+    }
+
+    private static (byte[] bytes, string mediaType) ConvertTiffIfNeeded(byte[] imageBytes, string mediaType)
+    {
+        if (mediaType != "image/tiff") return (imageBytes, mediaType);
+        return (ImageConversionHelper.ConvertTiffToPng(imageBytes), "image/png");
+    }
+
+    /// <summary>
+    /// Prepares image for Claude API: resizes large images and compresses as JPEG.
+    /// </summary>
+    private static (byte[] bytes, string mediaType) PrepareForAi(byte[] imageBytes)
+    {
+        return ImageConversionHelper.PrepareForAi(imageBytes);
     }
 
     [HttpPost("identify-card")]
@@ -23,25 +48,18 @@ public class AiController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest("No image uploaded");
 
-        var allowedTypes = new Dictionary<string, string>
-        {
-            [".jpg"] = "image/jpeg",
-            [".jpeg"] = "image/jpeg",
-            [".png"] = "image/png",
-            [".webp"] = "image/webp",
-            [".gif"] = "image/gif"
-        };
-
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!allowedTypes.TryGetValue(ext, out var mediaType))
-            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif");
+        if (!AllowedImageTypes.TryGetValue(ext, out var mediaType))
+            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif, tif, tiff");
 
-        if (file.Length > 20 * 1024 * 1024)
-            return BadRequest("File size exceeds 20MB limit");
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
 
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms);
         var imageBytes = ms.ToArray();
+
+        (imageBytes, mediaType) = PrepareForAi(imageBytes);
 
         try
         {
@@ -64,25 +82,18 @@ public class AiController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest("No image uploaded");
 
-        var allowedTypes = new Dictionary<string, string>
-        {
-            [".jpg"] = "image/jpeg",
-            [".jpeg"] = "image/jpeg",
-            [".png"] = "image/png",
-            [".webp"] = "image/webp",
-            [".gif"] = "image/gif"
-        };
-
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!allowedTypes.TryGetValue(ext, out var mediaType))
-            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif");
+        if (!AllowedImageTypes.TryGetValue(ext, out var mediaType))
+            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif, tif, tiff");
 
-        if (file.Length > 20 * 1024 * 1024)
-            return BadRequest("File size exceeds 20MB limit");
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
 
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms);
         var imageBytes = ms.ToArray();
+
+        (imageBytes, mediaType) = PrepareForAi(imageBytes);
 
         try
         {
@@ -92,11 +103,12 @@ public class AiController : ControllerBase
             if (backFile != null && backFile.Length > 0)
             {
                 var backExt = Path.GetExtension(backFile.FileName).ToLowerInvariant();
-                if (allowedTypes.TryGetValue(backExt, out backMediaType) && backFile.Length <= 20 * 1024 * 1024)
+                if (AllowedImageTypes.TryGetValue(backExt, out backMediaType) && backFile.Length <= 50 * 1024 * 1024)
                 {
                     using var backMs = new MemoryStream();
                     await backFile.CopyToAsync(backMs);
                     backBytes = backMs.ToArray();
+                    (backBytes, backMediaType) = PrepareForAi(backBytes);
                 }
             }
 

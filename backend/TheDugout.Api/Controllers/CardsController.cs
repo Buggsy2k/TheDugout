@@ -61,13 +61,13 @@ public class CardsController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest("No file uploaded");
 
-        var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+        var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff" };
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
         if (!allowedExtensions.Contains(ext))
-            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif");
+            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif, tif, tiff");
 
-        if (file.Length > 10 * 1024 * 1024)
-            return BadRequest("File size exceeds 10MB limit");
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
 
         var uploadsPath = _config["UploadsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
         var imagePath = await _cardService.UploadImageAsync(id, file, uploadsPath);

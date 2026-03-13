@@ -291,7 +291,7 @@ export default function CardDetail() {
               {!showBack && (
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
                   onChange={handleImageChange}
                   className="image-input"
                 />

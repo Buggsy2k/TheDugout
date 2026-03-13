@@ -7,7 +7,7 @@ public class CardImageExtractionService
     private readonly ILogger<CardImageExtractionService> _logger;
 
     private const float FallbackMarginPercent = 0.05f;
-    private const int OutputQuality = 95;
+    private const int OutputQuality = 97;
     // Card must occupy at least 25% of its grid cell to be detected
     private const double MinCardAreaRatio = 0.25;
 
@@ -182,11 +182,6 @@ public class CardImageExtractionService
         Cv2.WarpPerspective(cell, warped, transform, new Size(outWidth, outHeight),
             InterpolationFlags.Cubic, BorderTypes.Replicate);
 
-        // Unsharp mask: sharpen to counteract binder sleeve diffusion
-        using var blurred = new Mat();
-        Cv2.GaussianBlur(warped, blurred, new Size(0, 0), 3);
-        Cv2.AddWeighted(warped, 1.5, blurred, -0.5, 0, warped);
-
         return warped;
     }
 
@@ -205,14 +200,7 @@ public class CardImageExtractionService
             return cell.Clone();
 
         using var cropped = new Mat(cell, new Rect(marginX, marginY, w, h));
-        var result = cropped.Clone();
-
-        // Unsharp mask for sharpening
-        using var blurred = new Mat();
-        Cv2.GaussianBlur(result, blurred, new Size(0, 0), 3);
-        Cv2.AddWeighted(result, 1.5, blurred, -0.5, 0, result);
-
-        return result;
+        return cropped.Clone();
     }
 
     private static float Distance(Point2f a, Point2f b)

@@ -28,13 +28,13 @@ public class PagesController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest("No file uploaded");
 
-        var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
+        var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff" };
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
         if (!allowedExtensions.Contains(ext))
-            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif");
+            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif, tif, tiff");
 
-        if (file.Length > 20 * 1024 * 1024)
-            return BadRequest("File size exceeds 20MB limit");
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
 
         var uploadsPath = _config["UploadsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
         var imagePath = await _cardService.UploadPageImageAsync(binderNumber, pageNumber, file, uploadsPath);
@@ -47,6 +47,21 @@ public class PagesController : ControllerBase
     {
         var cards = await _cardService.GetPageCardsAsync(binderNumber, pageNumber);
         return Ok(cards);
+    }
+
+    [HttpPost("convert-preview")]
+    public async Task<IActionResult> ConvertPreview(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file uploaded");
+
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        var pngBytes = ImageConversionHelper.ConvertTiffToPng(ms.ToArray());
+        return File(pngBytes, "image/png");
     }
 
     [HttpPost("extract-cards")]
@@ -74,7 +89,9 @@ public class PagesController : ControllerBase
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms);
         var imageBytes = ms.ToArray();
-
+        // Convert TIFF to PNG before processing
+        if (ImageConversionHelper.IsTiff(ext))
+            imageBytes = ImageConversionHelper.ConvertTiffToPng(imageBytes);
         var uploadsPath = _config["UploadsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
         var extracted = await _extractionService.ExtractCardsFromPageAsync(
             imageBytes, layout, uploadsPath, binderNumber, pageNumber, side);

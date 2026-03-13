@@ -253,14 +253,21 @@ public class CardService
         var card = await _db.Cards.FindAsync(id);
         if (card == null) return null;
 
-        var fileName = $"card_{id}_{Guid.NewGuid():N}{Path.GetExtension(file.FileName)}";
+        var ext = Path.GetExtension(file.FileName);
+        byte[] fileBytes;
+        using (var ms = new MemoryStream()) { await file.CopyToAsync(ms); fileBytes = ms.ToArray(); }
+
+        if (ImageConversionHelper.IsTiff(ext))
+        {
+            fileBytes = ImageConversionHelper.ConvertTiffToPng(fileBytes);
+            ext = ".png";
+        }
+
+        var fileName = $"card_{id}_{Guid.NewGuid():N}{ext}";
         var filePath = Path.Combine(uploadsPath, "cards", fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
-        using (var stream = new FileStream(filePath, FileMode.Create))
-        {
-            await file.CopyToAsync(stream);
-        }
+        await File.WriteAllBytesAsync(filePath, fileBytes);
 
         card.ImagePath = $"/uploads/cards/{fileName}";
         await _db.SaveChangesAsync();
@@ -320,14 +327,21 @@ public class CardService
 
     public async Task<string?> UploadPageImageAsync(int binderNumber, int pageNumber, IFormFile file, string uploadsPath)
     {
-        var fileName = $"page_b{binderNumber}_p{pageNumber}_{Guid.NewGuid():N}{Path.GetExtension(file.FileName)}";
+        var ext = Path.GetExtension(file.FileName);
+        byte[] fileBytes;
+        using (var ms = new MemoryStream()) { await file.CopyToAsync(ms); fileBytes = ms.ToArray(); }
+
+        if (ImageConversionHelper.IsTiff(ext))
+        {
+            fileBytes = ImageConversionHelper.ConvertTiffToPng(fileBytes);
+            ext = ".png";
+        }
+
+        var fileName = $"page_b{binderNumber}_p{pageNumber}_{Guid.NewGuid():N}{ext}";
         var filePath = Path.Combine(uploadsPath, "pages", fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
-        using (var stream = new FileStream(filePath, FileMode.Create))
-        {
-            await file.CopyToAsync(stream);
-        }
+        await File.WriteAllBytesAsync(filePath, fileBytes);
 
         return $"/uploads/pages/{fileName}";
     }

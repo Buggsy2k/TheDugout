@@ -125,22 +125,61 @@ export default function BulkEntry() {
     });
   };
 
-  const handlePageImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPageImage(file);
-    const reader = new FileReader();
-    reader.onload = () => setPageImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
+  const isTiff = (file: File) =>
+    /\.tiff?$/i.test(file.name) || file.type === 'image/tiff';
+
+  const convertTiffToPng = async (file: File): Promise<{ pngFile: File; previewUrl: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('http://localhost:5137/api/pages/convert-preview', {
+      method: 'POST',
+      body: formData,
+    });
+    const blob = await resp.blob();
+    const pngName = file.name.replace(/\.tiff?$/i, '.png');
+    const pngFile = new File([blob], pngName, { type: 'image/png' });
+    const previewUrl = URL.createObjectURL(blob);
+    return { pngFile, previewUrl };
   };
 
-  const handleBackImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePageImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setBackImage(file);
-    const reader = new FileReader();
-    reader.onload = () => setBackImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
+    if (isTiff(file)) {
+      try {
+        const { pngFile, previewUrl } = await convertTiffToPng(file);
+        setPageImage(pngFile);
+        setPageImagePreview(previewUrl);
+      } catch {
+        setPageImage(file);
+        setPageImagePreview(null);
+      }
+    } else {
+      setPageImage(file);
+      const reader = new FileReader();
+      reader.onload = () => setPageImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleBackImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (isTiff(file)) {
+      try {
+        const { pngFile, previewUrl } = await convertTiffToPng(file);
+        setBackImage(pngFile);
+        setBackImagePreview(previewUrl);
+      } catch {
+        setBackImage(file);
+        setBackImagePreview(null);
+      }
+    } else {
+      setBackImage(file);
+      const reader = new FileReader();
+      reader.onload = () => setBackImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
   };
 
   const applyDefaults = () => {
@@ -463,7 +502,7 @@ export default function BulkEntry() {
             )}
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,image/tiff"
               onChange={handlePageImageChange}
               className="image-input"
             />
@@ -491,7 +530,7 @@ export default function BulkEntry() {
             )}
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,image/tiff"
               onChange={handleBackImageChange}
               className="image-input"
             />
