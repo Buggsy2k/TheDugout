@@ -255,35 +255,54 @@ Include ALL 18 positions (rows 1-3, columns 1-6). Set isEmpty=true for empty poc
         }
     }
 
-    public async Task<AiResponse<PageIdentificationResult>?> IdentifyPageAsync(byte[] imageBytes, string mediaType, string layout = "3x3")
+    public async Task<AiResponse<PageIdentificationResult>?> IdentifyPageAsync(byte[] imageBytes, string mediaType, string layout = "3x3", byte[]? backImageBytes = null, string? backMediaType = null)
     {
         try
         {
             var is6x3 = string.Equals(layout, "6x3", StringComparison.OrdinalIgnoreCase);
             var prompt = is6x3 ? PageScanPrompt6x3 : PageScanPrompt3x3;
+
+            var hasBack = backImageBytes != null && backMediaType != null;
             var userText = is6x3
                 ? "Identify all baseball cards on these two side-by-side binder pages (6 columns × 3 rows)."
                 : "Identify all baseball cards on this binder page.";
+            if (hasBack)
+                userText += " A second image of the card backs is included — use it only to confirm card numbers. Do not extract other details from the backs.";
 
             var base64Image = Convert.ToBase64String(imageBytes);
+
+            var contentParts = new List<ContentBase>
+            {
+                new ImageContent
+                {
+                    Source = new ImageSource
+                    {
+                        MediaType = mediaType,
+                        Data = base64Image
+                    }
+                }
+            };
+
+            if (hasBack)
+            {
+                contentParts.Add(new ImageContent
+                {
+                    Source = new ImageSource
+                    {
+                        MediaType = backMediaType!,
+                        Data = Convert.ToBase64String(backImageBytes!)
+                    }
+                });
+            }
+
+            contentParts.Add(new TextContent { Text = userText });
 
             var messages = new List<Message>
             {
                 new Message
                 {
                     Role = RoleType.User,
-                    Content = new List<ContentBase>
-                    {
-                        new ImageContent
-                        {
-                            Source = new ImageSource
-                            {
-                                MediaType = mediaType,
-                                Data = base64Image
-                            }
-                        },
-                        new TextContent { Text = userText }
-                    }
+                    Content = contentParts
                 }
             };
 
@@ -291,7 +310,7 @@ Include ALL 18 positions (rows 1-3, columns 1-6). Set isEmpty=true for empty poc
             {
                 Messages = messages,
                 Model = Anthropic.SDK.Constants.AnthropicModels.Claude4Sonnet,
-                MaxTokens = is6x3 ? 8192 : 4096,
+                MaxTokens = is6x3 ? 16384 : 12000,
                 System = new List<SystemMessage>
                 {
                     new SystemMessage(prompt)
@@ -300,6 +319,13 @@ Include ALL 18 positions (rows 1-3, columns 1-6). Set isEmpty=true for empty poc
             };
 
             var response = await _client.Messages.GetClaudeMessageAsync(parameters);
+
+            if (string.Equals(response.StopReason, "max_tokens", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Claude response truncated (max_tokens) for page scan. Output tokens used: {Tokens}", response.Usage?.OutputTokens);
+                throw new InvalidOperationException("AI response was truncated — the page had too much detail. Try scanning fewer cards or a clearer image.");
+            }
+
             var responseText = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
 
             if (string.IsNullOrWhiteSpace(responseText))
@@ -370,6 +396,13 @@ Include ALL 18 positions (rows 1-3, columns 1-6). Set isEmpty=true for empty poc
             };
 
             var response = await _client.Messages.GetClaudeMessageAsync(parameters);
+
+            if (string.Equals(response.StopReason, "max_tokens", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Claude response truncated (max_tokens) for back scan. Output tokens used: {Tokens}", response.Usage?.OutputTokens);
+                throw new InvalidOperationException("AI response was truncated for back scan — try a clearer image.");
+            }
+
             var responseText = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
 
             if (string.IsNullOrWhiteSpace(responseText))

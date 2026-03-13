@@ -1085,6 +1085,23 @@ a:hover {
   text-align: center;
 }
 
+.page-indicator-clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 8px;
+  transition: background-color 0.15s;
+}
+
+.page-indicator-clickable:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.page-jump-input {
+  width: 80px;
+  text-align: center;
+  font-weight: 600;
+}
+
 .page-stats {
   display: flex;
   align-items: center;

@@ -9,10 +9,12 @@ namespace TheDugout.Api.Controllers;
 public class AiController : ControllerBase
 {
     private readonly ClaudeVisionService _visionService;
+    private readonly ILogger<AiController> _logger;
 
-    public AiController(ClaudeVisionService visionService)
+    public AiController(ClaudeVisionService visionService, ILogger<AiController> logger)
     {
         _visionService = visionService;
+        _logger = logger;
     }
 
     [HttpPost("identify-card")]
@@ -41,11 +43,19 @@ public class AiController : ControllerBase
         await file.CopyToAsync(ms);
         var imageBytes = ms.ToArray();
 
-        var response = await _visionService.IdentifySingleCardAsync(imageBytes, mediaType);
-        if (response == null)
-            return StatusCode(500, "Failed to identify card");
+        try
+        {
+            var response = await _visionService.IdentifySingleCardAsync(imageBytes, mediaType);
+            if (response == null)
+                return StatusCode(500, "Failed to identify card");
 
-        return Ok(response);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AI card identification failed");
+            return StatusCode(500, $"AI identification failed: {ex.Message}");
+        }
     }
 
     [HttpPost("identify-page")]
@@ -74,60 +84,33 @@ public class AiController : ControllerBase
         await file.CopyToAsync(ms);
         var imageBytes = ms.ToArray();
 
-        var response = await _visionService.IdentifyPageAsync(imageBytes, mediaType, layout);
-        if (response == null)
-            return StatusCode(500, "Failed to identify page");
-
-        // If a back image is provided, scan it for card numbers and merge
-        if (backFile != null && backFile.Length > 0)
+        try
         {
-            var backExt = Path.GetExtension(backFile.FileName).ToLowerInvariant();
-            if (allowedTypes.TryGetValue(backExt, out var backMediaType) && backFile.Length <= 20 * 1024 * 1024)
+            // Read back image bytes if provided
+            byte[]? backBytes = null;
+            string? backMediaType = null;
+            if (backFile != null && backFile.Length > 0)
             {
-                using var backMs = new MemoryStream();
-                await backFile.CopyToAsync(backMs);
-                var backBytes = backMs.ToArray();
-
-                var backResponse = await _visionService.IdentifyPageBackAsync(backBytes, backMediaType, layout);
-                if (backResponse != null)
+                var backExt = Path.GetExtension(backFile.FileName).ToLowerInvariant();
+                if (allowedTypes.TryGetValue(backExt, out backMediaType) && backFile.Length <= 20 * 1024 * 1024)
                 {
-                    MergeBackScanResults(response.Result, backResponse.Result);
-                    // Combine token usage
-                    response.TokenUsage.InputTokens += backResponse.TokenUsage.InputTokens;
-                    response.TokenUsage.OutputTokens += backResponse.TokenUsage.OutputTokens;
-                    response.TokenUsage.TotalTokens += backResponse.TokenUsage.TotalTokens;
+                    using var backMs = new MemoryStream();
+                    await backFile.CopyToAsync(backMs);
+                    backBytes = backMs.ToArray();
                 }
             }
+
+            var response = await _visionService.IdentifyPageAsync(imageBytes, mediaType, layout, backBytes, backMediaType);
+            if (response == null)
+                return StatusCode(500, "Failed to identify page");
+
+            return Ok(response);
         }
-
-        return Ok(response);
-    }
-
-    /// <summary>
-    /// Merges data from back scan into front scan results.
-    /// Only fills in fields that are null/empty in the front scan.
-    /// </summary>
-    private static void MergeBackScanResults(PageIdentificationResult front, PageIdentificationResult back)
-    {
-        var backLookup = back.Cards
-            .Where(c => !c.IsEmpty && c.Card != null)
-            .ToDictionary(c => (c.Row, c.Column), c => c.Card!);
-
-        foreach (var frontCard in front.Cards)
+        catch (Exception ex)
         {
-            if (frontCard.IsEmpty || frontCard.Card == null) continue;
-            if (!backLookup.TryGetValue((frontCard.Row, frontCard.Column), out var backCard)) continue;
-
-            if (string.IsNullOrEmpty(frontCard.Card.CardNumber))
-                frontCard.Card.CardNumber = backCard.CardNumber;
-            if (string.IsNullOrEmpty(frontCard.Card.Manufacturer))
-                frontCard.Card.Manufacturer = backCard.Manufacturer;
-            if (string.IsNullOrEmpty(frontCard.Card.Team))
-                frontCard.Card.Team = backCard.Team;
-            if (string.IsNullOrEmpty(frontCard.Card.Notes))
-                frontCard.Card.Notes = backCard.Notes;
-            else if (!string.IsNullOrEmpty(backCard.Notes))
-                frontCard.Card.Notes += " | Back: " + backCard.Notes;
+            _logger.LogError(ex, "AI page identification failed");
+            return StatusCode(500, $"AI scan failed: {ex.Message}");
         }
     }
+
 }

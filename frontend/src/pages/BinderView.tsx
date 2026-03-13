@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Plus, RotateCw, Minus, Trash2 } from 'lucide-react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, ChevronsRight, Plus, RotateCw, Minus, Trash2 } from 'lucide-react';
 import { binderApi, pageApi, cardApi } from '../services/api';
 import type { BinderDetail, Card } from '../types';
 import { formatCurrency, formatValueRange } from '../types';
@@ -13,13 +13,17 @@ const API_BASE = 'http://localhost:5137';
 export default function BinderView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialPage = parseInt(searchParams.get('page') || '1') || 1;
   const [binder, setBinder] = useState<BinderDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(initialPage);
   const [flippedCards, setFlippedCards] = useState<Set<number>>(new Set());
   const [showAllBacks, setShowAllBacks] = useState(false);
   const [editingPages, setEditingPages] = useState(false);
   const [pageCountInput, setPageCountInput] = useState('');
+  const [jumpInput, setJumpInput] = useState('');
+  const [showJumpInput, setShowJumpInput] = useState(false);
 
   const toggleFlip = (cardId: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -88,6 +92,17 @@ export default function BinderView() {
   }, [id]);
 
   const maxPage = binder?.totalPages || highestCardPage;
+
+  const lastPopulatedPage = binder?.cards.length
+    ? Math.max(...binder.cards.map(c => c.pageNumber))
+    : 0;
+
+  const jumpToPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(page, maxPage));
+    setCurrentPage(clamped);
+    setShowJumpInput(false);
+    setJumpInput('');
+  };
 
   const pageCards = binder?.cards.filter(c => c.pageNumber === currentPage) || [];
 
@@ -162,7 +177,34 @@ export default function BinderView() {
         >
           <ChevronLeft size={20} />
         </button>
-        <span className="page-indicator">Page {currentPage} of {maxPage}</span>
+        {showJumpInput ? (
+          <input
+            type="number"
+            className="input input-sm page-jump-input"
+            value={jumpInput}
+            min={1}
+            max={maxPage}
+            autoFocus
+            placeholder={`1–${maxPage}`}
+            onChange={e => setJumpInput(e.target.value)}
+            onBlur={() => { setShowJumpInput(false); setJumpInput(''); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                const val = parseInt(jumpInput);
+                if (!isNaN(val)) jumpToPage(val);
+              }
+              if (e.key === 'Escape') { setShowJumpInput(false); setJumpInput(''); }
+            }}
+          />
+        ) : (
+          <span
+            className="page-indicator page-indicator-clickable"
+            onClick={() => { setJumpInput(String(currentPage)); setShowJumpInput(true); }}
+            title="Click to jump to a page"
+          >
+            Page {currentPage} of {maxPage}
+          </span>
+        )}
         <button
           className="btn btn-icon"
           disabled={currentPage >= maxPage}
@@ -170,6 +212,16 @@ export default function BinderView() {
         >
           <ChevronRight size={20} />
         </button>
+        {lastPopulatedPage > 0 && (
+          <button
+            className="btn btn-sm"
+            onClick={() => jumpToPage(lastPopulatedPage)}
+            title={`Jump to page ${lastPopulatedPage}`}
+            disabled={currentPage === lastPopulatedPage}
+          >
+            <ChevronsRight size={14} /> Last Card (p.{lastPopulatedPage})
+          </button>
+        )}
       </div>
 
       <div className="page-stats">

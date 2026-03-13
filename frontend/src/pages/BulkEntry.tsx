@@ -190,7 +190,15 @@ export default function BulkEntry() {
       const identified = result.cards.filter(c => !c.isEmpty).length;
       toast.success(`AI identified ${identified} card${identified !== 1 ? 's' : ''} on this page`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'AI page scan failed';
+      let msg = 'AI page scan failed';
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: string } };
+        if (typeof axiosErr.response?.data === 'string' && axiosErr.response.data) {
+          msg = axiosErr.response.data;
+        }
+      } else if (err instanceof Error) {
+        msg = err.message;
+      }
       toast.error(msg);
     } finally {
       setScanning(false);
@@ -336,7 +344,7 @@ export default function BulkEntry() {
         toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created!`);
       }
 
-      navigate('/collection');
+      navigate(`/binders/${binderNumber}?page=${pageNumber}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save cards';
       toast.error(msg);
