@@ -6,7 +6,9 @@ public class CardImageExtractionService
 {
     private readonly ILogger<CardImageExtractionService> _logger;
 
-    private const float FallbackMarginPercent = 0.05f;
+    private const float FallbackMarginPercent = 0.03f;
+    // Percentage to expand detected card quad outward so edges/text aren't clipped
+    private const float ContourPaddingPercent = 0.02f;
     private const int OutputQuality = 97;
     // Card must occupy at least 25% of its grid cell to be detected
     private const double MinCardAreaRatio = 0.25;
@@ -122,11 +124,36 @@ public class CardImageExtractionService
         var quad = FindCardContour(cell);
         if (quad != null)
         {
-            var result = PerspectiveCorrect(cell, quad);
+            var padded = ExpandQuad(quad, cell.Width, cell.Height, ContourPaddingPercent);
+            var result = PerspectiveCorrect(cell, padded);
             if (result != null)
                 return result;
         }
         return FallbackCrop(cell);
+    }
+
+    /// <summary>
+    /// Expands a quadrilateral outward from its center by a percentage so the
+    /// resulting crop includes a small border around the card edges.
+    /// Points are clamped to the cell bounds.
+    /// </summary>
+    private static Point2f[] ExpandQuad(Point2f[] quad, int maxW, int maxH, float pct)
+    {
+        var cx = quad.Average(p => p.X);
+        var cy = quad.Average(p => p.Y);
+
+        var expanded = new Point2f[4];
+        for (int i = 0; i < 4; i++)
+        {
+            var dx = quad[i].X - cx;
+            var dy = quad[i].Y - cy;
+            var nx = quad[i].X + dx * pct;
+            var ny = quad[i].Y + dy * pct;
+            expanded[i] = new Point2f(
+                Math.Clamp(nx, 0, maxW - 1),
+                Math.Clamp(ny, 0, maxH - 1));
+        }
+        return expanded;
     }
 
     /// <summary>
