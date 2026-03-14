@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Sparkles, LayoutGrid, Columns, RotateCw } from 'lucide-react';
+import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, ImageIcon } from 'lucide-react';
 import { cardApi, pageApi, aiApi, binderApi } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
+import ImageCropDialog from '../components/ImageCropDialog';
 import { CONDITIONS } from '../types';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -51,6 +52,7 @@ export default function BulkEntry() {
   const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const { updateTokenUsage } = useTokenUsage();
 
   // Conflict dialog state
@@ -61,6 +63,21 @@ export default function BulkEntry() {
 
   const numCols = layout === '6x3' ? 6 : 3;
   const [cells, setCells] = useState<CellForm[][]>(buildEmptyGrid(3));
+
+  // Per-cell manually cropped images: croppedImages[row][col] = { file, previewUrl }
+  const [croppedImages, setCroppedImages] = useState<({ file: File; previewUrl: string } | null)[][]>(
+    () => Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => null))
+  );
+  const [croppedBackImages, setCroppedBackImages] = useState<({ file: File; previewUrl: string } | null)[][]>(
+    () => Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => null))
+  );
+  const [cropTarget, setCropTarget] = useState<{ row: number; col: number; side: 'front' | 'back' } | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  // Auto-extracted image paths per cell (populated after AI scan)
+  const [extractedImages, setExtractedImages] = useState<({ front?: string; back?: string } | null)[][]>(
+    () => Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => null))
+  );
 
   const [defaultSetName, setDefaultSetName] = useState('');
   const [defaultYear, setDefaultYear] = useState('');
@@ -111,6 +128,9 @@ export default function BulkEntry() {
     const newCols = newLayout === '6x3' ? 6 : 3;
     setLayout(newLayout);
     setCells(buildEmptyGrid(newCols));
+    setCroppedImages(Array.from({ length: 3 }, () => Array.from({ length: newCols }, () => null)));
+    setCroppedBackImages(Array.from({ length: 3 }, () => Array.from({ length: newCols }, () => null)));
+    setExtractedImages(Array.from({ length: 3 }, () => Array.from({ length: newCols }, () => null)));
     setPageImage(null);
     setPageImagePreview(null);
     setBackImage(null);
@@ -195,6 +215,48 @@ export default function BulkEntry() {
     toast.success('Defaults applied to empty fields');
   };
 
+  const extractCardImages = async () => {
+    if (!pageImage) return;
+    setExtracting(true);
+    try {
+      const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front');
+      let backExtracts: ExtractedCardImage[] = [];
+      if (backImage) {
+        backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back');
+      }
+      setExtractedImages(() => {
+        const fresh: ({ front?: string; back?: string } | null)[][] =
+          Array.from({ length: 3 }, () => Array.from({ length: numCols }, () => null));
+        for (const ext of frontExtracts) {
+          const ri = ext.row - 1;
+          const ci = ext.column - 1;
+          if (ri >= 0 && ri < 3 && ci >= 0 && ci < numCols) {
+            fresh[ri][ci] = { ...fresh[ri][ci], front: ext.imagePath };
+          }
+        }
+        // Back image columns are mirrored within each 3-col page
+        const colsPerPage = 3;
+        for (const ext of backExtracts) {
+          const ri = ext.row - 1;
+          const physicalCol = ext.column - 1; // 0-based
+          const pageOffset = physicalCol >= colsPerPage ? colsPerPage : 0;
+          const localCol = physicalCol - pageOffset;
+          const mirroredCol = (colsPerPage - 1 - localCol) + pageOffset;
+          if (ri >= 0 && ri < 3 && mirroredCol >= 0 && mirroredCol < numCols) {
+            fresh[ri][mirroredCol] = { ...fresh[ri][mirroredCol], back: ext.imagePath };
+          }
+        }
+        return fresh;
+      });
+      const frontCount = frontExtracts.length;
+      toast.success(`Extracted ${frontCount} card image${frontCount !== 1 ? 's' : ''}${backExtracts.length > 0 ? ' (front + back)' : ''}`);
+    } catch {
+      toast.error('Image extraction failed');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const handleScanWithAi = async () => {
     if (!pageImage) {
       toast.error('Upload a page photo first');
@@ -228,6 +290,12 @@ export default function BulkEntry() {
       });
       const identified = result.cards.filter(c => !c.isEmpty).length;
       toast.success(`AI identified ${identified} card${identified !== 1 ? 's' : ''} on this page`);
+
+      // Auto-extract card images after AI scan if not already extracted
+      const hasAnyExtracted = extractedImages.some(row => row.some(c => c !== null));
+      if (!hasAnyExtracted) {
+        await extractCardImages();
+      }
     } catch (err: unknown) {
       let msg = 'AI page scan failed';
       if (err && typeof err === 'object' && 'response' in err) {
@@ -334,54 +402,61 @@ export default function BulkEntry() {
 
       const created = await cardApi.bulkCreate(cards);
 
-      // Extract individual card images from page photos
-      if (pageImage && created.length > 0) {
-        try {
-          const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front');
-          let backExtracts: ExtractedCardImage[] = [];
-          if (backImage) {
-            backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back');
-          }
-
-          const assignments: CardImageAssignment[] = [];
-          // Number of columns per physical page (always 3 for a standard binder page)
-          const colsPerPage = 3;
-          for (const card of created) {
-            // Match extracted images to created cards by row/column
-            // For 6x3, right-page cards (page+1) have cols 1-3 but were extracted as cols 4-6
-            const gridCol = card.pageNumber === pageNumber + 1 && layout === '6x3'
-              ? card.column + 3
-              : card.column;
-
-            const front = frontExtracts.find(e => e.row === card.row && e.column === gridCol);
-
-            // Back photo is a mirror of the front — columns are reversed within each page
-            // e.g. for 3x3: front col 1 = back col 3, front col 2 = back col 2
-            // For 6x3: mirror within each 3-col half (cols 1-3 and cols 4-6 independently)
-            const pageColOffset = gridCol > colsPerPage ? colsPerPage : 0;
-            const localCol = gridCol - pageColOffset;
-            const mirroredCol = (colsPerPage + 1 - localCol) + pageColOffset;
-            const back = backExtracts.find(e => e.row === card.row && e.column === mirroredCol);
-            if (front || back) {
-              assignments.push({
-                cardId: card.id,
-                frontImagePath: front?.imagePath,
-                backImagePath: back?.imagePath,
-              });
-            }
-          }
-
-          if (assignments.length > 0) {
-            await pageApi.assignExtractedImages(assignments);
-          }
-          toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created with images!`);
-        } catch {
-          // Image extraction failed but cards were created successfully
-          toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created (image extraction failed)`);
+      // Upload manually cropped images first
+      const fullyAssignedIds = new Set<number>();
+      for (const card of created) {
+        const gridCol = card.pageNumber === pageNumber + 1 && layout === '6x3'
+          ? card.column + 3 - 1
+          : card.column - 1;
+        const gridRow = card.row - 1;
+        const cropped = croppedImages[gridRow]?.[gridCol];
+        const croppedBack = croppedBackImages[gridRow]?.[gridCol];
+        if (cropped) {
+          try {
+            await cardApi.uploadImage(card.id, cropped.file);
+          } catch { /* will fall back to extracted */ }
         }
-      } else {
-        toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created!`);
+        if (croppedBack) {
+          try {
+            await cardApi.uploadBackImage(card.id, croppedBack.file);
+          } catch { /* will fall back to extracted */ }
+        }
+        // Track if both sides are covered by manual crops
+        if (cropped && croppedBack) fullyAssignedIds.add(card.id);
       }
+
+      // Assign pre-extracted images (from AI scan step) for cards not fully manually cropped
+      const assignments: CardImageAssignment[] = [];
+      for (const card of created) {
+        if (fullyAssignedIds.has(card.id)) continue;
+
+        const gridCol = card.pageNumber === pageNumber + 1 && layout === '6x3'
+          ? card.column + 3 - 1
+          : card.column - 1;
+        const gridRow = card.row - 1;
+        const extracted = extractedImages[gridRow]?.[gridCol];
+        const hasCropFront = !!croppedImages[gridRow]?.[gridCol];
+        const hasCropBack = !!croppedBackImages[gridRow]?.[gridCol];
+
+        const frontPath = !hasCropFront && extracted?.front ? extracted.front : undefined;
+        const backPath = !hasCropBack && extracted?.back ? extracted.back : undefined;
+
+        if (frontPath || backPath) {
+          assignments.push({
+            cardId: card.id,
+            frontImagePath: frontPath,
+            backImagePath: backPath,
+          });
+        }
+      }
+
+      if (assignments.length > 0) {
+        try {
+          await pageApi.assignExtractedImages(assignments);
+        } catch { /* image assignment failed but cards saved */ }
+      }
+
+      toast.success(`${created.length} card${created.length !== 1 ? 's' : ''} created!`);
 
       navigate(`/binders/${binderNumber}?page=${pageNumber}`);
     } catch (err: unknown) {
@@ -508,15 +583,27 @@ export default function BulkEntry() {
             />
           </div>
           {pageImage && (
-            <button
-              type="button"
-              className="btn btn-accent btn-ai"
-              onClick={handleScanWithAi}
-              disabled={scanning}
-            >
-              <Sparkles size={16} />
-              {scanning ? 'Scanning...' : 'Scan Page with AI'}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={extractCardImages}
+                disabled={extracting || scanning}
+                style={{ marginBottom: '0.5rem' }}
+              >
+                <ImageIcon size={16} />
+                {extracting ? 'Extracting...' : 'Extract Card Images'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-accent btn-ai"
+                onClick={handleScanWithAi}
+                disabled={scanning || extracting}
+              >
+                <Sparkles size={16} />
+                {scanning ? 'Scanning...' : 'Scan Page with AI'}
+              </button>
+            </>
           )}
           <label style={{ marginTop: '0.75rem' }}>Page Photo — Back (optional)</label>
           <div className="page-image-upload">
@@ -549,7 +636,46 @@ export default function BulkEntry() {
               <div key={ci} className={`bulk-cell ${layout === '6x3' && ci === 3 ? 'bulk-cell-divider' : ''}`}>
                 <div className="bulk-cell-header">
                   <span>{layout === '6x3' ? `P${displayPage} R${ri + 1}-C${displayCol}` : `R${ri + 1} - C${ci + 1}`}</span>
+                  {pageImagePreview && (
+                    <button
+                      type="button"
+                      className="btn-crop-cell"
+                      title="Crop front card image"
+                      onClick={() => setCropTarget({ row: ri, col: ci, side: 'front' })}
+                    >
+                      <Crop size={14} /> Front
+                    </button>
+                  )}
+                  {backImagePreview && (
+                    <button
+                      type="button"
+                      className="btn-crop-cell"
+                      title="Crop back card image"
+                      onClick={() => setCropTarget({ row: ri, col: ci, side: 'back' })}
+                    >
+                      <Crop size={14} /> Back
+                    </button>
+                  )}
                 </div>
+                {/* Show cropped or auto-extracted image previews */}
+                {(() => {
+                  const hasCropFront = !!croppedImages[ri]?.[ci];
+                  const hasCropBack = !!croppedBackImages[ri]?.[ci];
+                  const extracted = extractedImages[ri]?.[ci];
+                  const frontSrc = hasCropFront
+                    ? croppedImages[ri][ci]!.previewUrl
+                    : extracted?.front ? `http://localhost:5137${extracted.front}` : null;
+                  const backSrc = hasCropBack
+                    ? croppedBackImages[ri][ci]!.previewUrl
+                    : extracted?.back ? `http://localhost:5137${extracted.back}` : null;
+                  if (!frontSrc && !backSrc) return null;
+                  return (
+                    <div className="bulk-cell-crop-preview">
+                      {frontSrc && <img src={frontSrc} alt="Front" onClick={() => setLightboxSrc(frontSrc)} />}
+                      {backSrc && <img src={backSrc} alt="Back" onClick={() => setLightboxSrc(backSrc)} />}
+                    </div>
+                  );
+                })()}
                 <div className="bulk-cell-fields">
                   <input
                     type="text"
@@ -645,6 +771,43 @@ export default function BulkEntry() {
           onUseSuggestion={handleConflictUseSuggestion}
           onOverwrite={handleConflictOverwrite}
         />
+      )}
+
+      {cropTarget && (
+        (cropTarget.side === 'front' ? pageImagePreview : backImagePreview) && (
+        <ImageCropDialog
+          imageUrl={(cropTarget.side === 'front' ? pageImagePreview : backImagePreview)!}
+          cellLabel={`${cropTarget.side === 'back' ? 'Back — ' : ''}${layout === '6x3'
+            ? `P${cropTarget.col >= 3 ? pageNumber + 1 : pageNumber} R${cropTarget.row + 1}-C${cropTarget.col >= 3 ? cropTarget.col - 2 : cropTarget.col + 1}`
+            : `R${cropTarget.row + 1} - C${cropTarget.col + 1}`}`}
+          onCrop={(file) => {
+            const previewUrl = URL.createObjectURL(file);
+            const setter = cropTarget.side === 'front' ? setCroppedImages : setCroppedBackImages;
+            const getter = cropTarget.side === 'front' ? croppedImages : croppedBackImages;
+            setter(prev => {
+              const updated = prev.map(r => [...r]);
+              if (updated[cropTarget.row][cropTarget.col]) {
+                URL.revokeObjectURL(updated[cropTarget.row][cropTarget.col]!.previewUrl);
+              }
+              updated[cropTarget.row][cropTarget.col] = { file, previewUrl };
+              return updated;
+            });
+            setCropTarget(null);
+            toast.success(`${cropTarget.side === 'back' ? 'Back' : 'Front'} image cropped`);
+          }}
+          onCancel={() => setCropTarget(null)}
+        />
+      ))}
+
+      {lightboxSrc && (
+        <div className="dialog-overlay" onClick={() => setLightboxSrc(null)}>
+          <img
+            src={lightboxSrc}
+            alt="Full size preview"
+            className="lightbox-image"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
       )}
     </div>
   );

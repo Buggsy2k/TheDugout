@@ -24,6 +24,7 @@ export interface Card {
   gradeValue?: string;
   createdAt: string;
   updatedAt: string;
+  lastAuditedAt?: string;
 }
 
 export interface CreateCard {
@@ -216,4 +217,18 @@ export interface PageCardResult {
 export interface PageIdentificationResult {
   cards: PageCardResult[];
   pageNotes?: string;
+}
+
+export interface BulkRescanResult {
+  updated: number;
+  failed: number;
+  skipped: number;
+  totalTokensUsed: number;
+  details: BulkRescanDetail[];
+}
+
+export interface BulkRescanDetail {
+  cardId: number;
+  status: string;
+  message: string;
 }

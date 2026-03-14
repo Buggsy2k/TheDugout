@@ -399,7 +399,8 @@ public class CardService
         GradingService = c.GradingService,
         GradeValue = c.GradeValue,
         CreatedAt = c.CreatedAt,
-        UpdatedAt = c.UpdatedAt
+        UpdatedAt = c.UpdatedAt,
+        LastAuditedAt = c.LastAuditedAt
     };
 
     private static Dictionary<string, int> GetConditionOrder() => new()

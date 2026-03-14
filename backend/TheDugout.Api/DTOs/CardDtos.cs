@@ -28,6 +28,7 @@ public class CardDto
     public bool IsUnassigned { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? LastAuditedAt { get; set; }
 }
 
 public class CreateCardDto

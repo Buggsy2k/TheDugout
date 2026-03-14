@@ -84,6 +84,8 @@ public class Card
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    public DateTime? LastAuditedAt { get; set; }
+
     // Full-text search vector (generated column in PostgreSQL)
     public NpgsqlTsVector? SearchVector { get; set; }
 

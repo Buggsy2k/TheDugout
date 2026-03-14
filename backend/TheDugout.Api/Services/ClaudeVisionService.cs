@@ -10,35 +10,85 @@ public class ClaudeVisionService
     private readonly AnthropicClient _client;
     private readonly ILogger<ClaudeVisionService> _logger;
 
-    private const string SingleCardPrompt = @"You are an expert baseball card identifier and appraiser. Analyze the image of this baseball card and provide detailed information.
+    private const string SingleCardPrompt = @"You are a world-class baseball card expert with encyclopedic knowledge of every major card set from 1948 to present. Analyze this card image with extreme precision.
 
-Return ONLY valid JSON (no markdown fences, no extra text) in this exact format:
+IDENTIFICATION STEPS — follow in order:
+1. READ all visible text on the card: player name, team name, card number, set logo, copyright line, manufacturer name
+2. IDENTIFY the exact set by design elements:
+   - Border color/style, photo type (action vs posed), logo placement
+   - Topps (flagship, Chrome, Heritage, Stadium Club, Allen & Ginter, Gypsy Queen)
+   - Donruss (Diamond Kings, Rated Rookie), Fleer (Ultra, Tradition), Upper Deck
+   - Bowman (Chrome, Draft, 1st), Panini (Prizm, Select, Mosaic)
+   - Score, Leaf, Pacific, Pinnacle, Skybox, etc.
+3. DETERMINE the exact year from copyright text, design era, and uniform/stadium details
+4. NOTE card number exactly as printed (include any prefix like #, T, RC)
+5. CHECK for special designations: Rookie Card (RC), All-Star, League Leader, Record Breaker, Error, Variation, Insert, Parallel (refractor, gold, foil)
+
+CONDITION GRADING — judge what is visible:
+- Centering: Are borders even on all sides? Slight off-center = EX, noticeably off = VG
+- Corners: Sharp and pointed = NM+, slight rounding = EX, visible wear = VG or below
+- Edges: Clean = NM+, slight roughness = EX, chipping/fuzzing = VG or below
+- Surface: Clean and glossy = NM+, minor scratches = EX, creases/stains = lower
+- Note: Cards in sleeves look better than raw — be conservative
+
+VALUE GUIDELINES — provide realistic market values in USD:
+- Common base cards (1980s-2000s): $0.10-$1.00
+- Common base cards (1950s-1970s): $1.00-$20.00 depending on condition
+- Star players: 2x-10x base value
+- Hall of Famers: 5x-50x base value
+- Rookie cards of stars: significantly higher
+- Error cards, short prints: premium over base
+- If uncertain, provide a wider range rather than guessing wrong
+
+Return ONLY valid JSON (no markdown fences, no extra text):
 {
-  ""playerName"": ""full player name"",
+  ""playerName"": ""EXACT name as printed on card"",
   ""year"": 1987,
-  ""setName"": ""e.g. Topps, Fleer, Upper Deck"",
-  ""cardNumber"": ""card number in the set or null"",
-  ""team"": ""team name shown on card"",
-  ""manufacturer"": ""card manufacturer"",
+  ""setName"": ""exact set name e.g. Topps, 1987 Fleer, 1993 Upper Deck"",
+  ""cardNumber"": ""exact number as printed including any prefix"",
+  ""team"": ""team as shown on card"",
+  ""manufacturer"": ""Topps, Fleer, Donruss, Upper Deck, Bowman, Panini, etc."",
   ""estimatedCondition"": ""one of: PR, FR, GD, VG, VGEX, EX, EXMT, NM, NMMT, MT, GEM, UNKNOWN"",
-  ""conditionNotes"": ""any visible condition issues like creases, corner wear, centering problems"",
+  ""conditionNotes"": ""specific observations about centering, corners, edges, surface"",
   ""valueRangeLow"": 0.50,
   ""valueRangeHigh"": 2.00,
-  ""notes"": ""any interesting facts about this card such as rookie card, error card, subset info"",
-  ""tags"": ""comma-separated tags like rookie,hall-of-fame,error,all-star"",
+  ""notes"": ""rookie card, error, subset, parallel, insert, or other notable features"",
+  ""tags"": ""comma-separated: rookie,hall-of-fame,error,all-star,insert,parallel,etc."",
   ""confidence"": 0.85
 }
 
-For estimatedCondition, judge based on visible centering, corners, edges, and surface condition.
-For value estimates, provide a reasonable range in USD based on the card identity and apparent condition.
-Set confidence between 0.0 and 1.0 indicating how sure you are of the identification.
-If you cannot identify the card at all, set playerName to ""Unknown"" and confidence to 0.0.";
+IMPORTANT: Read the actual text on the card. Do not guess if you can read it. If text is partially obscured, note what you can read and estimate the rest with lower confidence.";
 
-    private const string PageScanPrompt3x3 = @"You are an expert baseball card identifier. This image shows a binder page with baseball cards arranged in a grid (typically 3 rows × 3 columns in standard 9-pocket pages).
+    private const string PageScanPrompt3x3 = @"You are a world-class baseball card expert with encyclopedic knowledge of every major card set from 1948 to present. This image shows a binder page with baseball cards in a 3-row × 3-column grid (standard 9-pocket page).
 
-Analyze each visible card in the grid. For each pocket/position, identify whether it contains a card or is empty.
+For EACH card, follow these identification steps:
+1. READ all visible text: player name, team, card number, copyright, set logo/branding
+2. IDENTIFY the exact set by design elements (border style, photo type, logo placement, color scheme)
+3. DETERMINE the exact year from copyright text, design era, uniforms
+4. NOTE the card number exactly as printed
+5. CHECK for special designations: RC (Rookie Card), All-Star, Error, Insert, Parallel
 
-Return ONLY valid JSON (no markdown fences, no extra text) in this exact format:
+COMMON SET IDENTIFICATION:
+- Topps flagship: most common, look for Topps logo and year-specific border design
+- Donruss: distinctive border patterns, Diamond Kings subset
+- Fleer: clean designs, often with team logo
+- Upper Deck: hologram on front, premium feel
+- Bowman: prospect-focused, Chrome variants
+- Score: bold colorful designs
+
+CONDITION — judge conservatively (cards in sleeves appear better than they are):
+- NM/NMMT: Sharp corners, centered, clean surface
+- EX/EXMT: Very slight corner wear or minor centering issue
+- VG/VGEX: Noticeable wear but still presentable
+- Lower: Significant creases, stains, or damage visible
+
+VALUE — realistic USD ranges:
+- Common 1980s-2000s base cards: $0.05-$0.50
+- Common 1960s-1970s: $1-$15 depending on condition
+- Star players: 2x-10x common value
+- Hall of Famers / Rookies of stars: significantly more
+
+Return ONLY valid JSON (no markdown fences, no extra text):
 {
   ""cards"": [
     {
@@ -46,17 +96,17 @@ Return ONLY valid JSON (no markdown fences, no extra text) in this exact format:
       ""column"": 1,
       ""isEmpty"": false,
       ""card"": {
-        ""playerName"": ""full player name"",
+        ""playerName"": ""EXACT name as printed"",
         ""year"": 1987,
-        ""setName"": ""e.g. Topps"",
-        ""cardNumber"": ""card number or null"",
-        ""team"": ""team name"",
+        ""setName"": ""exact set name"",
+        ""cardNumber"": ""number as printed"",
+        ""team"": ""team as shown"",
         ""manufacturer"": ""manufacturer"",
-        ""estimatedCondition"": ""one of: PR, FR, GD, VG, VGEX, EX, EXMT, NM, NMMT, MT, GEM, UNKNOWN"",
-        ""conditionNotes"": ""visible condition issues"",
-        ""valueRangeLow"": 0.50,
-        ""valueRangeHigh"": 2.00,
-        ""notes"": ""interesting facts"",
+        ""estimatedCondition"": ""PR/FR/GD/VG/VGEX/EX/EXMT/NM/NMMT/MT/GEM/UNKNOWN"",
+        ""conditionNotes"": ""specific observations"",
+        ""valueRangeLow"": 0.25,
+        ""valueRangeHigh"": 1.00,
+        ""notes"": ""RC, error, subset, parallel, or other notable features"",
         ""tags"": ""comma-separated tags"",
         ""confidence"": 0.85
       }
@@ -68,21 +118,45 @@ Return ONLY valid JSON (no markdown fences, no extra text) in this exact format:
       ""card"": null
     }
   ],
-  ""pageNotes"": ""any observations about the page as a whole""
+  ""pageNotes"": ""observations about the page — are all cards from the same set/year?""
 }
 
-Grid positions: Row 1 is the top row, Row 3 is the bottom. Column 1 is left, Column 3 is right.
-Include ALL 9 positions (rows 1-3, columns 1-3) even if some are empty.
-Set confidence between 0.0 and 1.0 for each identified card.
-If a pocket has a card but you can't identify it, set playerName to ""Unknown"" with low confidence.";
+Grid: Row 1=top, Row 3=bottom. Column 1=left, Column 3=right.
+Include ALL 9 positions (rows 1-3, columns 1-3) even if empty.
+IMPORTANT: Read the actual text on each card. Do not guess names or numbers if you can read them.";
 
-    private const string PageScanPrompt6x3 = @"You are an expert baseball card identifier. This image shows TWO binder pages side by side (an open album spread), each with 3 rows × 3 columns of card pockets. Together they form a 3-row × 6-column grid of 18 card positions.
+    private const string PageScanPrompt6x3 = @"You are a world-class baseball card expert with encyclopedic knowledge of every major card set from 1948 to present. This image shows TWO binder pages side by side (open album spread), each with 3 rows × 3 columns. Together: 3 rows × 6 columns = 18 positions.
 
 The LEFT page has columns 1-3. The RIGHT page has columns 4-6.
 
-Analyze each visible card in the grid. For each pocket/position, identify whether it contains a card or is empty.
+For EACH card, follow these identification steps:
+1. READ all visible text: player name, team, card number, copyright, set logo/branding
+2. IDENTIFY the exact set by design elements (border style, photo type, logo placement, color scheme)
+3. DETERMINE the exact year from copyright text, design era, uniforms
+4. NOTE the card number exactly as printed
+5. CHECK for special designations: RC (Rookie Card), All-Star, Error, Insert, Parallel
 
-Return ONLY valid JSON (no markdown fences, no extra text) in this exact format:
+COMMON SET IDENTIFICATION:
+- Topps flagship: most common, look for Topps logo and year-specific border design
+- Donruss: distinctive border patterns, Diamond Kings subset
+- Fleer: clean designs, often with team logo
+- Upper Deck: hologram on front, premium feel
+- Bowman: prospect-focused, Chrome variants
+- Score: bold colorful designs
+
+CONDITION — judge conservatively (cards in sleeves appear better than they are):
+- NM/NMMT: Sharp corners, centered, clean surface
+- EX/EXMT: Very slight corner wear or minor centering issue
+- VG/VGEX: Noticeable wear but still presentable
+- Lower: Significant creases, stains, or damage visible
+
+VALUE — realistic USD ranges:
+- Common 1980s-2000s base cards: $0.05-$0.50
+- Common 1960s-1970s: $1-$15 depending on condition
+- Star players: 2x-10x common value
+- Hall of Famers / Rookies of stars: significantly more
+
+Return ONLY valid JSON (no markdown fences, no extra text):
 {
   ""cards"": [
     {
@@ -90,37 +164,28 @@ Return ONLY valid JSON (no markdown fences, no extra text) in this exact format:
       ""column"": 1,
       ""isEmpty"": false,
       ""card"": {
-        ""playerName"": ""full player name"",
+        ""playerName"": ""EXACT name as printed"",
         ""year"": 1987,
-        ""setName"": ""e.g. Topps"",
-        ""cardNumber"": ""card number or null"",
-        ""team"": ""team name"",
+        ""setName"": ""exact set name"",
+        ""cardNumber"": ""number as printed"",
+        ""team"": ""team as shown"",
         ""manufacturer"": ""manufacturer"",
-        ""estimatedCondition"": ""one of: PR, FR, GD, VG, VGEX, EX, EXMT, NM, NMMT, MT, GEM, UNKNOWN"",
-        ""conditionNotes"": ""visible condition issues"",
-        ""valueRangeLow"": 0.50,
-        ""valueRangeHigh"": 2.00,
-        ""notes"": ""interesting facts"",
+        ""estimatedCondition"": ""PR/FR/GD/VG/VGEX/EX/EXMT/NM/NMMT/MT/GEM/UNKNOWN"",
+        ""conditionNotes"": ""specific observations"",
+        ""valueRangeLow"": 0.25,
+        ""valueRangeHigh"": 1.00,
+        ""notes"": ""RC, error, subset, parallel, or other notable features"",
         ""tags"": ""comma-separated tags"",
         ""confidence"": 0.85
       }
-    },
-    {
-      ""row"": 1,
-      ""column"": 4,
-      ""isEmpty"": true,
-      ""card"": null
     }
   ],
-  ""pageNotes"": ""any observations about the pages as a whole""
+  ""pageNotes"": ""observations about the pages — same set/year? any patterns?""
 }
 
-Grid positions: Row 1 is the top row, Row 3 is the bottom.
-Left page: Column 1 is far left, Column 3 is center-left.
-Right page: Column 4 is center-right, Column 6 is far right.
-Include ALL 18 positions (rows 1-3, columns 1-6) even if some are empty.
-Set confidence between 0.0 and 1.0 for each identified card.
-If a pocket has a card but you can't identify it, set playerName to ""Unknown"" with low confidence.";
+Grid: Row 1=top, Row 3=bottom. Left page: Col 1-3. Right page: Col 4-6.
+Include ALL 18 positions (rows 1-3, columns 1-6) even if empty.
+IMPORTANT: Read the actual text on each card. Do not guess names or numbers if you can read them.";
 
     private const string BackScanPrompt3x3 = @"You are an expert baseball card identifier. This image shows the BACK side of a binder page with 3 rows × 3 columns of baseball cards.
 
@@ -191,29 +256,48 @@ Include ALL 18 positions (rows 1-3, columns 1-6). Set isEmpty=true for empty poc
         _logger = logger;
     }
 
-    public async Task<AiResponse<CardIdentificationResult>?> IdentifySingleCardAsync(byte[] imageBytes, string mediaType)
+    public async Task<AiResponse<CardIdentificationResult>?> IdentifySingleCardAsync(byte[] imageBytes, string mediaType, byte[]? backImageBytes = null, string? backMediaType = null)
     {
         try
         {
             var base64Image = Convert.ToBase64String(imageBytes);
+
+            var contentList = new List<ContentBase>
+            {
+                new ImageContent
+                {
+                    Source = new ImageSource
+                    {
+                        MediaType = mediaType,
+                        Data = base64Image
+                    }
+                }
+            };
+
+            if (backImageBytes != null && !string.IsNullOrEmpty(backMediaType))
+            {
+                var base64Back = Convert.ToBase64String(backImageBytes);
+                contentList.Add(new ImageContent
+                {
+                    Source = new ImageSource
+                    {
+                        MediaType = backMediaType,
+                        Data = base64Back
+                    }
+                });
+                contentList.Add(new TextContent { Text = "Identify this baseball card. The first image is the front and the second image is the back. Use both images for identification — the back often has card number, copyright year, manufacturer, and player stats." });
+            }
+            else
+            {
+                contentList.Add(new TextContent { Text = "Identify this baseball card." });
+            }
 
             var messages = new List<Message>
             {
                 new Message
                 {
                     Role = RoleType.User,
-                    Content = new List<ContentBase>
-                    {
-                        new ImageContent
-                        {
-                            Source = new ImageSource
-                            {
-                                MediaType = mediaType,
-                                Data = base64Image
-                            }
-                        },
-                        new TextContent { Text = "Identify this baseball card." }
-                    }
+                    Content = contentList
                 }
             };
 

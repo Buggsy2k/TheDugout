@@ -47,3 +47,24 @@ public class PageCardResult
     public CardIdentificationResult? Card { get; set; }
     public bool IsEmpty { get; set; }
 }
+
+public class BulkRescanRequest
+{
+    public List<int> CardIds { get; set; } = new();
+}
+
+public class BulkRescanResult
+{
+    public int Updated { get; set; }
+    public int Failed { get; set; }
+    public int Skipped { get; set; }
+    public int TotalTokensUsed { get; set; }
+    public List<BulkRescanDetail> Details { get; set; } = new();
+}
+
+public class BulkRescanDetail
+{
+    public int CardId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+}

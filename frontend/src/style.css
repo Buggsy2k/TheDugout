@@ -245,6 +245,15 @@ a:hover {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 .page-title {
   font-size: 1.75rem;
   font-weight: 700;
@@ -1054,6 +1063,14 @@ a:hover {
   border-top: 1px solid var(--border);
 }
 
+.card-metadata {
+  display: flex;
+  gap: 16px;
+  padding-top: 12px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 /* ============================================
    Binder View Page
    ============================================ */
@@ -1431,15 +1448,6 @@ a:hover {
   overflow: hidden;
 }
 
-.bulk-cell-header {
-  padding: 8px 12px;
-  background: var(--bg-tertiary);
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  font-family: monospace;
-}
-
 .bulk-cell-fields {
   padding: 10px;
   display: flex;
@@ -1505,6 +1513,134 @@ a:hover {
   gap: 12px;
   justify-content: flex-end;
   padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Crop button in bulk cell header */
+.btn-crop-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  margin-left: auto;
+}
+
+.btn-crop-cell:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.bulk-cell-header {
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: monospace;
+  display: flex;
+  align-items: center;
+}
+
+.bulk-cell-crop-preview {
+  height: 60px;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bulk-cell-crop-preview img {
+  max-height: 100%;
+  max-width: 48%;
+  object-fit: contain;
+  image-rendering: high-quality;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.bulk-cell-crop-preview img:hover {
+  opacity: 0.8;
+}
+
+/* Lightbox for full-size image preview */
+.lightbox-image {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* Image Crop Dialog */
+.crop-dialog {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  max-width: 95vw;
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.crop-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.crop-dialog-header h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.crop-close {
+  margin-left: auto;
+}
+
+.crop-dialog-hint {
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.crop-canvas-container {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.crop-canvas {
+  cursor: crosshair;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.crop-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 12px 20px;
   border-top: 1px solid var(--border);
 }
 

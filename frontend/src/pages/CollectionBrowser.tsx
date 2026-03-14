@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Grid, List, Filter, X, Trash2, CheckSquare, Square } from 'lucide-react';
-import { cardApi, binderApi } from '../services/api';
+import { Grid, List, Filter, X, Trash2, CheckSquare, Square, RefreshCw } from 'lucide-react';
+import { cardApi, binderApi, aiApi } from '../services/api';
 import type { Card, CardQueryParams, PaginatedResult, Binder } from '../types';
 import { CONDITIONS } from '../types';
 import { useDebounce, useLocalStorage } from '../hooks';
@@ -22,6 +22,7 @@ export default function CollectionBrowser() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCards, setSelectedCards] = useState<Set<number>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
 
   // Filter states from URL params
   const search = searchParams.get('search') || '';
@@ -126,6 +127,28 @@ export default function CollectionBrowser() {
     }
   };
 
+  const rescanSelected = async () => {
+    if (selectedCards.size === 0) return;
+    if (!confirm(`Rescan ${selectedCards.size} selected card(s) with AI? This will update card info using the latest AI analysis.`)) return;
+    setRescanning(true);
+    try {
+      const ids = Array.from(selectedCards);
+      const result = await aiApi.bulkRescan(ids);
+      const parts: string[] = [];
+      if (result.updated > 0) parts.push(`${result.updated} updated`);
+      if (result.skipped > 0) parts.push(`${result.skipped} skipped`);
+      if (result.failed > 0) parts.push(`${result.failed} failed`);
+      toast.success(`AI Rescan: ${parts.join(', ')}`);
+      setSelectedCards(new Set());
+      setSelectMode(false);
+      fetchCards();
+    } catch {
+      toast.error('AI rescan failed');
+    } finally {
+      setRescanning(false);
+    }
+  };
+
   return (
     <div className="page collection-page">
       <div className="collection-header">
@@ -192,9 +215,14 @@ export default function CollectionBrowser() {
           </button>
           <span>{selectedCards.size} selected</span>
           {selectedCards.size > 0 && (
-            <button className="btn btn-sm btn-danger" onClick={deleteSelected}>
-              <Trash2 size={14} /> Delete Selected
-            </button>
+            <>
+              <button className="btn btn-sm btn-accent" onClick={rescanSelected} disabled={rescanning}>
+                <RefreshCw size={14} className={rescanning ? 'spin' : ''} /> {rescanning ? 'Rescanning...' : 'Rescan with AI'}
+              </button>
+              <button className="btn btn-sm btn-danger" onClick={deleteSelected}>
+                <Trash2 size={14} /> Delete Selected
+              </button>
+            </>
           )}
         </div>
       )}
@@ -311,6 +339,7 @@ export default function CollectionBrowser() {
                   <th>Condition</th>
                   <th>Value</th>
                   <th>Location</th>
+                  <th>Last Audited</th>
                 </tr>
               </thead>
               <tbody>
@@ -329,6 +358,7 @@ export default function CollectionBrowser() {
                     <td><ConditionBadge condition={card.estimatedCondition} /></td>
                     <td>{formatValueRange(card.valueRangeLow, card.valueRangeHigh)}</td>
                     <td>{formatLocation(card.binderNumber, card.pageNumber, card.row, card.column)}</td>
+                    <td className="audit-cell">{card.lastAuditedAt ? new Date(card.lastAuditedAt).toLocaleDateString() : '—'}</td>
                   </tr>
                 ))}
               </tbody>

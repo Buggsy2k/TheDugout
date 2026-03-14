@@ -113,22 +113,61 @@ export default function CardDetail() {
       .finally(() => setLoading(false));
   }, [id, isNew, searchParams]);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
+  const isTiff = (file: File) =>
+    /\.tiff?$/i.test(file.name) || file.type === 'image/tiff';
+
+  const convertTiffToPng = async (file: File): Promise<{ pngFile: File; previewUrl: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('http://localhost:5137/api/pages/convert-preview', {
+      method: 'POST',
+      body: formData,
+    });
+    const blob = await resp.blob();
+    const pngName = file.name.replace(/\.tiff?$/i, '.png');
+    const pngFile = new File([blob], pngName, { type: 'image/png' });
+    const previewUrl = URL.createObjectURL(blob);
+    return { pngFile, previewUrl };
   };
 
-  const handleBackImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setBackImageFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setBackImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
+    if (isTiff(file)) {
+      try {
+        const { pngFile, previewUrl } = await convertTiffToPng(file);
+        setImageFile(pngFile);
+        setImagePreview(previewUrl);
+      } catch {
+        setImageFile(file);
+        setImagePreview(null);
+      }
+    } else {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onload = () => setImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleBackImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (isTiff(file)) {
+      try {
+        const { pngFile, previewUrl } = await convertTiffToPng(file);
+        setBackImageFile(pngFile);
+        setBackImagePreview(previewUrl);
+      } catch {
+        setBackImageFile(file);
+        setBackImagePreview(null);
+      }
+    } else {
+      setBackImageFile(file);
+      const reader = new FileReader();
+      reader.onload = () => setBackImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleIdentifyWithAi = async () => {
@@ -138,7 +177,7 @@ export default function CardDetail() {
     }
     setIdentifying(true);
     try {
-      const response = await aiApi.identifyCard(imageFile);
+      const response = await aiApi.identifyCard(imageFile, backImageFile || undefined, id ? parseInt(id) : undefined);
       const result = response.result;
       updateTokenUsage(response.tokenUsage);
       setForm(prev => ({
@@ -577,6 +616,12 @@ export default function CardDetail() {
             <Save size={16} /> {saving ? 'Saving...' : isNew ? 'Create Card' : 'Save Changes'}
           </button>
         </div>
+
+        {!isNew && existingCard && (
+          <div className="card-metadata">
+            <span>Last AI Audit: {existingCard.lastAuditedAt ? new Date(existingCard.lastAuditedAt).toLocaleString() : 'Never'}</span>
+          </div>
+        )}
       </form>
 
       {showConflictDialog && (

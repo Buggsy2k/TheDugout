@@ -10,6 +10,8 @@ public class CardImageExtractionService
     private const int OutputQuality = 97;
     // Card must occupy at least 25% of its grid cell to be detected
     private const double MinCardAreaRatio = 0.25;
+    // Minimum edge density (fraction of edge pixels) to consider a cell occupied
+    private const double MinEdgeDensity = 0.02;
 
     public CardImageExtractionService(ILogger<CardImageExtractionService> logger)
     {
@@ -46,6 +48,13 @@ public class CardImageExtractionService
                 if (cellW <= 0 || cellH <= 0) continue;
 
                 using var cell = new Mat(image, new Rect(cellX, cellY, cellW, cellH));
+
+                if (IsCellEmpty(cell))
+                {
+                    _logger.LogInformation("Skipping empty cell: row={Row}, col={Col}", r + 1, c + 1);
+                    continue;
+                }
+
                 using var cardImage = ExtractCardFromCell(cell);
 
                 var fileName = $"b{binderNumber}_p{pageNumber}_r{r + 1}c{c + 1}_{side}_{Guid.NewGuid():N}.jpg";
@@ -64,6 +73,44 @@ public class CardImageExtractionService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Detects whether a grid cell is empty (no card present).
+    /// Uses edge density and color variance — a real card has printed content
+    /// that produces many edges and higher color variation than an empty sleeve pocket.
+    /// </summary>
+    private bool IsCellEmpty(Mat cell)
+    {
+        using var gray = new Mat();
+        Cv2.CvtColor(cell, gray, ColorConversionCodes.BGR2GRAY);
+
+        using var blurred = new Mat();
+        Cv2.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+
+        // Check edge density — cards have printed text/graphics that produce many edges
+        using var edges = new Mat();
+        Cv2.Canny(blurred, edges, 50, 150);
+        var edgePixels = Cv2.CountNonZero(edges);
+        var totalPixels = edges.Rows * edges.Cols;
+        var edgeDensity = (double)edgePixels / totalPixels;
+
+        if (edgeDensity < MinEdgeDensity)
+        {
+            _logger.LogDebug("Cell edge density {Density:F4} below threshold {Threshold}",
+                edgeDensity, MinEdgeDensity);
+            return true;
+        }
+
+        // Check color variance — empty pockets have very uniform color
+        Cv2.MeanStdDev(gray, out _, out var stdDev);
+        if (stdDev[0] < 15)
+        {
+            _logger.LogDebug("Cell stddev {StdDev:F1} below threshold", stdDev[0]);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

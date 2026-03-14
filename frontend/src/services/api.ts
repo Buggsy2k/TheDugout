@@ -16,6 +16,7 @@ import type {
   ConflictCheckResult,
   ExtractedCardImage,
   CardImageAssignment,
+  BulkRescanResult,
 } from '../types';
 
 const api = axios.create({
@@ -143,11 +144,15 @@ export const pageApi = {
 
 // AI API
 export const aiApi = {
-  identifyCard(file: File): Promise<AiResponse<CardIdentificationResult>> {
+  identifyCard(file: File, backFile?: File, cardId?: number): Promise<AiResponse<CardIdentificationResult>> {
     const formData = new FormData();
     formData.append('file', file);
+    if (backFile) {
+      formData.append('backFile', backFile);
+    }
     return api.post('/ai/identify-card', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      params: cardId ? { cardId } : undefined,
     }).then(r => r.data);
   },
 
@@ -161,6 +166,10 @@ export const aiApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
       params: { layout },
     }).then(r => r.data);
+  },
+
+  bulkRescan(cardIds: number[]): Promise<BulkRescanResult> {
+    return api.post('/ai/bulk-rescan', { cardIds }).then(r => r.data);
   },
 };
 
