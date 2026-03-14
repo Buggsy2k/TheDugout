@@ -84,27 +84,19 @@ public class CardImageExtractionService
 
     /// <summary>
     /// Finds the largest convex quadrilateral in the cell that could be a card.
-    /// Uses Canny edge detection + morphological closing to find card boundaries.
+    /// Uses Gaussian blur + Canny edges with moderate morphological closing.
     /// </summary>
     private Point2f[]? FindCardContour(Mat cell)
     {
         using var gray = new Mat();
         Cv2.CvtColor(cell, gray, ColorConversionCodes.BGR2GRAY);
 
-        // Bilateral filter preserves edges while smoothing noise
-        using var filtered = new Mat();
-        Cv2.BilateralFilter(gray, filtered, 9, 75, 75);
+        using var blurred = new Mat();
+        Cv2.GaussianBlur(gray, blurred, new Size(5, 5), 0);
 
-        // Adaptive threshold handles uneven lighting from binder sleeves
-        using var thresh = new Mat();
-        Cv2.AdaptiveThreshold(filtered, thresh, 255,
-            AdaptiveThresholdTypes.GaussianC, ThresholdTypes.Binary, 11, 2);
-
-        // Canny edge detection
         using var edges = new Mat();
-        Cv2.Canny(filtered, edges, 30, 100);
+        Cv2.Canny(blurred, edges, 30, 100);
 
-        // Close gaps in edge contours
         using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(3, 3));
         using var closed = new Mat();
         Cv2.MorphologyEx(edges, closed, MorphTypes.Close, kernel, iterations: 2);
@@ -122,16 +114,46 @@ public class CardImageExtractionService
             if (area < minArea || area <= bestArea) continue;
 
             var peri = Cv2.ArcLength(contour, true);
-            var approx = Cv2.ApproxPolyDP(contour, 0.02 * peri, true);
 
-            if (approx.Length == 4 && Cv2.IsContourConvex(approx))
+            // Try two epsilon values to handle slight sleeve distortion
+            foreach (var epsFactor in new[] { 0.02, 0.04 })
             {
-                bestArea = area;
-                bestQuad = OrderQuadPoints(approx.Select(p => new Point2f(p.X, p.Y)).ToArray());
+                var approx = Cv2.ApproxPolyDP(contour, epsFactor * peri, true);
+                if (approx.Length == 4 && Cv2.IsContourConvex(approx))
+                {
+                    var quad = OrderQuadPoints(approx.Select(p => new Point2f(p.X, p.Y)).ToArray());
+                    if (IsCardAspectRatio(quad))
+                    {
+                        bestArea = area;
+                        bestQuad = quad;
+                        break;
+                    }
+                }
             }
         }
 
         return bestQuad;
+    }
+
+    /// <summary>
+    /// Validates that a quadrilateral has roughly standard card proportions (2.5:3.5).
+    /// </summary>
+    private static bool IsCardAspectRatio(Point2f[] quad)
+    {
+        var widthTop = Distance(quad[0], quad[1]);
+        var widthBottom = Distance(quad[3], quad[2]);
+        var heightLeft = Distance(quad[0], quad[3]);
+        var heightRight = Distance(quad[1], quad[2]);
+
+        var avgWidth = (widthTop + widthBottom) / 2;
+        var avgHeight = (heightLeft + heightRight) / 2;
+
+        if (avgWidth < 10 || avgHeight < 10) return false;
+
+        // Aspect ratio: card is 2.5" x 3.5" = 0.714 ratio
+        // Allow wide tolerance (0.5 to 0.95) for sleeve padding variations
+        var ratio = Math.Min(avgWidth, avgHeight) / Math.Max(avgWidth, avgHeight);
+        return ratio >= 0.45 && ratio <= 0.95;
     }
 
     /// <summary>

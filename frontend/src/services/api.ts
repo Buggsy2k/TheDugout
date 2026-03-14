@@ -52,6 +52,14 @@ export const cardApi = {
     }).then(r => r.data);
   },
 
+  uploadBackImage(id: number, file: File): Promise<{ imagePath: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/cards/upload-back-image/${id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data);
+  },
+
   bulkCreate(cards: CreateCard[]): Promise<Card[]> {
     return api.post('/cards/bulk', cards).then(r => r.data);
   },

@@ -76,6 +76,27 @@ public class CardsController : ControllerBase
         return Ok(new { imagePath });
     }
 
+    [HttpPost("upload-back-image/{id}")]
+    public async Task<IActionResult> UploadBackImage(int id, IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file uploaded");
+
+        var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff" };
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!allowedExtensions.Contains(ext))
+            return BadRequest("Invalid file type. Allowed: jpg, jpeg, png, webp, gif, tif, tiff");
+
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
+
+        var uploadsPath = _config["UploadsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+        var imagePath = await _cardService.UploadBackImageAsync(id, file, uploadsPath);
+        if (imagePath == null) return NotFound();
+
+        return Ok(new { imagePath });
+    }
+
     [HttpPost("bulk")]
     public async Task<ActionResult<List<CardDto>>> BulkCreate([FromBody] List<CreateCardDto> dtos)
     {

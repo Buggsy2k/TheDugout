@@ -274,6 +274,32 @@ public class CardService
         return card.ImagePath;
     }
 
+    public async Task<string?> UploadBackImageAsync(int id, IFormFile file, string uploadsPath)
+    {
+        var card = await _db.Cards.FindAsync(id);
+        if (card == null) return null;
+
+        var ext = Path.GetExtension(file.FileName);
+        byte[] fileBytes;
+        using (var ms = new MemoryStream()) { await file.CopyToAsync(ms); fileBytes = ms.ToArray(); }
+
+        if (ImageConversionHelper.IsTiff(ext))
+        {
+            fileBytes = ImageConversionHelper.ConvertTiffToPng(fileBytes);
+            ext = ".png";
+        }
+
+        var fileName = $"card_{id}_back_{Guid.NewGuid():N}{ext}";
+        var filePath = Path.Combine(uploadsPath, "cards", fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+
+        await File.WriteAllBytesAsync(filePath, fileBytes);
+
+        card.BackImagePath = $"/uploads/cards/{fileName}";
+        await _db.SaveChangesAsync();
+        return card.BackImagePath;
+    }
+
     public async Task<CollectionStats> GetStatsAsync()
     {
         var cards = _db.Cards.Where(c => !c.IsUnassigned);

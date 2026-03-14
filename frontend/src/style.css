@@ -1025,6 +1025,27 @@ a:hover {
   cursor: pointer;
 }
 
+.image-replace-hint {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 0.8rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.image-upload-area:hover .image-replace-hint {
+  opacity: 1;
+}
+
 .card-form-actions {
   display: flex;
   gap: 12px;

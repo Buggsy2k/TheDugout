@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw } from 'lucide-react';
+import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera } from 'lucide-react';
 import { cardApi, binderApi, aiApi } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
@@ -46,6 +46,7 @@ export default function CardDetail() {
   const [saving, setSaving] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [backImageFile, setBackImageFile] = useState<File | null>(null);
   const [showBack, setShowBack] = useState(false);
   const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
   const [identifying, setIdentifying] = useState(false);
@@ -118,6 +119,15 @@ export default function CardDetail() {
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleBackImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBackImageFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setBackImagePreview(reader.result as string);
     reader.readAsDataURL(file);
   };
 
@@ -229,6 +239,9 @@ export default function CardDetail() {
       if (imageFile) {
         await cardApi.uploadImage(savedCard.id, imageFile);
       }
+      if (backImageFile) {
+        await cardApi.uploadBackImage(savedCard.id, backImageFile);
+      }
 
       navigate(`/cards/${savedCard.id}`);
     } catch (err: unknown) {
@@ -277,18 +290,31 @@ export default function CardDetail() {
           <div className="card-form-image">
             <div className="image-upload-area">
               {(showBack ? backImagePreview : imagePreview) ? (
-                <img
-                  src={(showBack ? backImagePreview : imagePreview)!}
-                  alt={`Card preview${showBack ? ' (back)' : ''}`}
-                  className="image-preview"
-                />
+                <>
+                  <img
+                    src={(showBack ? backImagePreview : imagePreview)!}
+                    alt={`Card preview${showBack ? ' (back)' : ''}`}
+                    className="image-preview"
+                  />
+                  <div className="image-replace-hint">
+                    <Camera size={16} />
+                    <span>Replace</span>
+                  </div>
+                </>
               ) : (
                 <div className="image-placeholder">
                   <Upload size={32} />
-                  <span>{showBack ? 'No Back Image' : 'Upload Image'}</span>
+                  <span>{showBack ? 'Upload Back Image' : 'Upload Image'}</span>
                 </div>
               )}
-              {!showBack && (
+              {showBack ? (
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
+                  onChange={handleBackImageChange}
+                  className="image-input"
+                />
+              ) : (
                 <input
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
@@ -318,7 +344,6 @@ export default function CardDetail() {
                 {identifying ? 'Identifying...' : 'Identify with AI'}
               </button>
             )}
-
           </div>
 
           {/* Card info fields */}
