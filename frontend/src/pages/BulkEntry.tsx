@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, ImageIcon } from 'lucide-react';
-import { cardApi, pageApi, aiApi, binderApi } from '../services/api';
+import { cardApi, pageApi, aiApi, binderApi, API_BASE } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import ImageCropDialog from '../components/ImageCropDialog';
 import { CONDITIONS } from '../types';
@@ -151,7 +151,7 @@ export default function BulkEntry() {
   const convertTiffToPng = async (file: File): Promise<{ pngFile: File; previewUrl: string }> => {
     const formData = new FormData();
     formData.append('file', file);
-    const resp = await fetch('http://localhost:5137/api/pages/convert-preview', {
+    const resp = await fetch(`${API_BASE}/api/pages/convert-preview`, {
       method: 'POST',
       body: formData,
     });
@@ -664,10 +664,10 @@ export default function BulkEntry() {
                   const extracted = extractedImages[ri]?.[ci];
                   const frontSrc = hasCropFront
                     ? croppedImages[ri][ci]!.previewUrl
-                    : extracted?.front ? `http://localhost:5137${extracted.front}` : null;
+                    : extracted?.front ? `${API_BASE}${extracted.front}` : null;
                   const backSrc = hasCropBack
                     ? croppedBackImages[ri][ci]!.previewUrl
-                    : extracted?.back ? `http://localhost:5137${extracted.back}` : null;
+                    : extracted?.back ? `${API_BASE}${extracted.back}` : null;
                   if (!frontSrc && !backSrc) return null;
                   return (
                     <div className="bulk-cell-crop-preview">

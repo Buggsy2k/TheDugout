@@ -19,8 +19,10 @@ import type {
   BulkRescanResult,
 } from '../types';
 
+export const API_BASE = `http://${window.location.hostname}:5137`;
+
 const api = axios.create({
-  baseURL: 'http://localhost:5137/api',
+  baseURL: `${API_BASE}/api`,
 });
 
 // Cards API

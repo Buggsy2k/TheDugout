@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera } from 'lucide-react';
-import { cardApi, binderApi, aiApi } from '../services/api';
+import { cardApi, binderApi, aiApi, API_BASE } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import { useTokenUsage } from '../contexts/TokenUsageContext';
 import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
 import toast from 'react-hot-toast';
-
-const API_BASE = 'http://localhost:5137';
 
 const emptyCard: CreateCard = {
   binderNumber: 1,
@@ -119,7 +117,7 @@ export default function CardDetail() {
   const convertTiffToPng = async (file: File): Promise<{ pngFile: File; previewUrl: string }> => {
     const formData = new FormData();
     formData.append('file', file);
-    const resp = await fetch('http://localhost:5137/api/pages/convert-preview', {
+    const resp = await fetch(`${API_BASE}/api/pages/convert-preview`, {
       method: 'POST',
       body: formData,
     });

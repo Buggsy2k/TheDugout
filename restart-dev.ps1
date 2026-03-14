@@ -85,7 +85,7 @@ Write-Host "`n=== Starting development processes ===" -ForegroundColor Cyan
 Write-Host "Starting backend (dotnet run)..." -ForegroundColor Yellow
 try {
     Start-Process pwsh -ArgumentList "-NoExit", "-Command", `
-        "Set-Location '$backendDir'; Write-Host 'Starting backend...' -ForegroundColor Cyan; dotnet run" `
+        "Set-Location '$backendDir'; Write-Host 'Starting backend...' -ForegroundColor Cyan; dotnet run --urls 'http://0.0.0.0:5137'" `
         -ErrorAction Stop
     Write-Host "  Backend window launched" -ForegroundColor Green
 }

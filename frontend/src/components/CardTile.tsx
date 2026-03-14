@@ -5,11 +5,11 @@ import { formatValueRange, formatLocation, getConditionInfo } from '../types';
 import ConditionBadge from './ConditionBadge';
 import { useNavigate } from 'react-router-dom';
 
+import { API_BASE } from '../services/api';
+
 interface CardTileProps {
   card: Card;
 }
-
-const API_BASE = 'http://localhost:5137';
 
 export default function CardTile({ card }: CardTileProps) {
   const navigate = useNavigate();
