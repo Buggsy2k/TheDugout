@@ -1,14 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronsRight, Plus, RotateCw, Minus, Trash2 } from 'lucide-react';
-import { binderApi, pageApi, cardApi } from '../services/api';
+import { binderApi, pageApi, cardApi, API_BASE } from '../services/api';
 import type { BinderDetail, Card } from '../types';
 import { formatCurrency, formatValueRange } from '../types';
 import ConditionBadge from '../components/ConditionBadge';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import toast from 'react-hot-toast';
-
-const API_BASE = 'http://localhost:5137';
 
 export default function BinderView() {
   const { id } = useParams<{ id: string }>();
