@@ -176,19 +176,8 @@ export function formatLocation(binderNumber: number, pageNumber: number, row: nu
 }
 
 // AI identification types
-export interface TokenUsageInfo {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  tokensRemaining?: number;
-  tokensLimit?: number;
-  inputTokensRemaining?: number;
-  outputTokensRemaining?: number;
-}
-
 export interface AiResponse<T> {
   result: T;
-  tokenUsage: TokenUsageInfo;
 }
 
 export interface CardIdentificationResult {

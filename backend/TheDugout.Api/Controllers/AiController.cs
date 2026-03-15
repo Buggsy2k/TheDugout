@@ -102,6 +102,11 @@ public class AiController : ControllerBase
 
             return Ok(response);
         }
+        catch (Exception ex) when (ex.Message.Contains("credit balance", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Anthropic API credit balance too low");
+            return StatusCode(402, "Anthropic API credits exhausted. Please add credits at console.anthropic.com.");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "AI card identification failed");
@@ -150,6 +155,11 @@ public class AiController : ControllerBase
                 return StatusCode(500, "Failed to identify page");
 
             return Ok(response);
+        }
+        catch (Exception ex) when (ex.Message.Contains("credit balance", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Anthropic API credit balance too low");
+            return StatusCode(402, "Anthropic API credits exhausted. Please add credits at console.anthropic.com.");
         }
         catch (Exception ex)
         {
@@ -247,6 +257,13 @@ public class AiController : ControllerBase
                 if (response.TokenUsage != null)
                     result.TotalTokensUsed += response.TokenUsage.TotalTokens;
                 result.Details.Add(new BulkRescanDetail { CardId = card.Id, Status = "updated", Message = $"{aiResult.PlayerName} ({Math.Round(aiResult.Confidence * 100)}%)" });
+            }
+            catch (Exception ex) when (ex.Message.Contains("credit balance", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Anthropic API credit balance too low during bulk rescan");
+                result.Failed++;
+                result.Details.Add(new BulkRescanDetail { CardId = card.Id, Status = "failed", Message = "API credits exhausted" });
+                break; // No point continuing if billing is the issue
             }
             catch (Exception ex)
             {

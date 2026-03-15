@@ -5,7 +5,6 @@ import { cardApi, binderApi, aiApi, API_BASE } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
 import LoadingSkeleton from '../components/LoadingSkeleton';
-import { useTokenUsage } from '../contexts/TokenUsageContext';
 import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
 import toast from 'react-hot-toast';
 
@@ -48,7 +47,6 @@ export default function CardDetail() {
   const [showBack, setShowBack] = useState(false);
   const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
   const [identifying, setIdentifying] = useState(false);
-  const { updateTokenUsage } = useTokenUsage();
 
   // Conflict dialog state
   const [conflictCards, setConflictCards] = useState<Card[]>([]);
@@ -177,7 +175,6 @@ export default function CardDetail() {
     try {
       const response = await aiApi.identifyCard(imageFile, backImageFile || undefined, id ? parseInt(id) : undefined);
       const result = response.result;
-      updateTokenUsage(response.tokenUsage);
       setForm(prev => ({
         ...prev,
         playerName: result.playerName || prev.playerName,
