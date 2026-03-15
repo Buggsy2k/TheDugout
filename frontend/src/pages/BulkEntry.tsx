@@ -235,6 +235,8 @@ export default function BulkEntry() {
       canvas.height = newH;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, newW, newH);
       ctx.translate(newW / 2, newH / 2);
       ctx.rotate(rad);
       ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);

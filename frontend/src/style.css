@@ -993,6 +993,7 @@ a:hover {
   justify-content: center;
   gap: 6px;
   padding: 8px;
+  cursor: pointer;
   background: rgba(0, 0, 0, 0.6);
   color: white;
   font-size: 0.8rem;

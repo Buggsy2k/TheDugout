@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera } from 'lucide-react';
+import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera, Crop } from 'lucide-react';
 import { cardApi, binderApi, aiApi, API_BASE } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
@@ -47,6 +47,17 @@ export default function CardDetail() {
   const [showBack, setShowBack] = useState(false);
   const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
   const [identifying, setIdentifying] = useState(false);
+
+  // Lightbox editor state
+  const [lightbox, setLightbox] = useState<{ src: string; side: 'front' | 'back' } | null>(null);
+  const [lightboxRotation, setLightboxRotation] = useState(0);
+  const [rotationDegrees, setRotationDegrees] = useState(0);
+  const [lightboxCropMode, setLightboxCropMode] = useState(false);
+  const [lightboxCropRect, setLightboxCropRect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const [lightboxDrawing, setLightboxDrawing] = useState(false);
+  const lightboxCanvasRef = useRef<HTMLCanvasElement>(null);
+  const lightboxImgRef = useRef<HTMLImageElement | null>(null);
+  const lightboxScaleRef = useRef(1);
 
   // Conflict dialog state
   const [conflictCards, setConflictCards] = useState<Card[]>([]);
@@ -164,6 +175,156 @@ export default function CardDetail() {
       reader.onload = () => setBackImagePreview(reader.result as string);
       reader.readAsDataURL(file);
     }
+  };
+
+  // Lightbox editor functions
+  const openLightbox = (src: string, side: 'front' | 'back') => {
+    setLightbox({ src, side });
+    setLightboxRotation(0);
+    setRotationDegrees(0);
+    setLightboxCropMode(false);
+    setLightboxCropRect(null);
+  };
+
+  const closeLightbox = () => {
+    setLightbox(null);
+    setLightboxRotation(0);
+    setRotationDegrees(0);
+    setLightboxCropMode(false);
+    setLightboxCropRect(null);
+    lightboxImgRef.current = null;
+  };
+
+  const drawLightboxCanvas = useCallback((rect: typeof lightboxCropRect) => {
+    const canvas = lightboxCanvasRef.current;
+    const img = lightboxImgRef.current;
+    if (!canvas || !img) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    if (rect) {
+      const x = Math.min(rect.startX, rect.endX);
+      const y = Math.min(rect.startY, rect.endY);
+      const w = Math.abs(rect.endX - rect.startX);
+      const h = Math.abs(rect.endY - rect.startY);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(0, 0, canvas.width, y);
+      ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
+      ctx.fillRect(0, y, x, h);
+      ctx.fillRect(x + w, y, canvas.width - x - w, h);
+      ctx.strokeStyle = '#60a5fa';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!lightboxCropMode || !lightbox) return;
+    const canvas = lightboxCanvasRef.current;
+    if (!canvas) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      lightboxImgRef.current = img;
+      const maxW = window.innerWidth * 0.85;
+      const maxH = window.innerHeight * 0.7;
+      const s = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+      lightboxScaleRef.current = s;
+      canvas.width = img.naturalWidth * s;
+      canvas.height = img.naturalHeight * s;
+      drawLightboxCanvas(null);
+    };
+    img.src = lightbox.src;
+  }, [lightboxCropMode, lightbox, drawLightboxCanvas]);
+
+  const applyLightboxRotation = () => {
+    if (!lightbox || lightboxRotation === 0) return;
+    const doRotate = (img: HTMLImageElement) => {
+      const rad = (lightboxRotation * Math.PI) / 180;
+      const absCos = Math.abs(Math.cos(rad));
+      const absSin = Math.abs(Math.sin(rad));
+      const newW = Math.round(img.naturalWidth * absCos + img.naturalHeight * absSin);
+      const newH = Math.round(img.naturalWidth * absSin + img.naturalHeight * absCos);
+      const canvas = document.createElement('canvas');
+      canvas.width = newW;
+      canvas.height = newH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, newW, newH);
+      ctx.translate(newW / 2, newH / 2);
+      ctx.rotate(rad);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      canvas.toBlob(blob => {
+        if (!blob || !lightbox) return;
+        const file = new File([blob], `rotated_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const previewUrl = URL.createObjectURL(blob);
+        if (lightbox.side === 'front') {
+          setImageFile(file);
+          setImagePreview(previewUrl);
+        } else {
+          setBackImageFile(file);
+          setBackImagePreview(previewUrl);
+        }
+        const newImg = new Image();
+        newImg.crossOrigin = 'anonymous';
+        newImg.onload = () => { lightboxImgRef.current = newImg; };
+        newImg.src = previewUrl;
+        setLightbox({ ...lightbox, src: previewUrl });
+        setLightboxRotation(0);
+        setRotationDegrees(0);
+        toast.success(`Rotation applied (${lightboxRotation}\u00b0)`);
+      }, 'image/jpeg', 0.95);
+    };
+    if (lightboxImgRef.current && lightboxImgRef.current.complete) {
+      doRotate(lightboxImgRef.current);
+    } else {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => { lightboxImgRef.current = img; doRotate(img); };
+      img.src = lightbox.src;
+    }
+  };
+
+  const handleLightboxCropConfirm = () => {
+    if (!lightboxCropRect || !lightbox) return;
+    const img = lightboxImgRef.current;
+    if (!img || !img.complete) { toast.error('Image not loaded yet'); return; }
+    const s = lightboxScaleRef.current;
+    const x = Math.min(lightboxCropRect.startX, lightboxCropRect.endX) / s;
+    const y = Math.min(lightboxCropRect.startY, lightboxCropRect.endY) / s;
+    const w = Math.abs(lightboxCropRect.endX - lightboxCropRect.startX) / s;
+    const h = Math.abs(lightboxCropRect.endY - lightboxCropRect.startY) / s;
+    if (w < 10 || h < 10) return;
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = Math.round(w);
+    cropCanvas.height = Math.round(h);
+    const ctx = cropCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img, Math.round(x), Math.round(y), Math.round(w), Math.round(h), 0, 0, cropCanvas.width, cropCanvas.height);
+    try {
+      cropCanvas.toBlob(blob => {
+        if (!blob || !lightbox) return;
+        const file = new File([blob], `crop_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const previewUrl = URL.createObjectURL(blob);
+        if (lightbox.side === 'front') {
+          setImageFile(file);
+          setImagePreview(previewUrl);
+        } else {
+          setBackImageFile(file);
+          setBackImagePreview(previewUrl);
+        }
+        const newImg = new Image();
+        newImg.crossOrigin = 'anonymous';
+        newImg.onload = () => { lightboxImgRef.current = newImg; };
+        newImg.src = previewUrl;
+        setLightbox({ ...lightbox, src: previewUrl });
+        setLightboxCropMode(false);
+        setLightboxCropRect(null);
+        toast.success('Image cropped');
+      }, 'image/jpeg', 0.95);
+    } catch { toast.error('Crop failed'); }
   };
 
   const handleIdentifyWithAi = async () => {
@@ -329,11 +490,23 @@ export default function CardDetail() {
                     src={(showBack ? backImagePreview : imagePreview)!}
                     alt={`Card preview${showBack ? ' (back)' : ''}`}
                     className="image-preview"
+                    onClick={() => {
+                      const src = (showBack ? backImagePreview : imagePreview)!;
+                      openLightbox(src, showBack ? 'back' : 'front');
+                    }}
+                    style={{ cursor: 'pointer' }}
+                    title="Click to edit image"
                   />
-                  <div className="image-replace-hint">
+                  <label className="image-replace-hint" title="Replace image">
                     <Camera size={16} />
                     <span>Replace</span>
-                  </div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
+                      onChange={showBack ? handleBackImageChange : handleImageChange}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
                 </>
               ) : (
                 <div className="image-placeholder">
@@ -341,20 +514,22 @@ export default function CardDetail() {
                   <span>{showBack ? 'Upload Back Image' : 'Upload Image'}</span>
                 </div>
               )}
-              {showBack ? (
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
-                  onChange={handleBackImageChange}
-                  className="image-input"
-                />
-              ) : (
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
-                  onChange={handleImageChange}
-                  className="image-input"
-                />
+              {!(showBack ? backImagePreview : imagePreview) && (
+                showBack ? (
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
+                    onChange={handleBackImageChange}
+                    className="image-input"
+                  />
+                ) : (
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/tiff"
+                    onChange={handleImageChange}
+                    className="image-input"
+                  />
+                )
               )}
             </div>
             {(imagePreview || backImagePreview) && (
@@ -628,6 +803,105 @@ export default function CardDetail() {
           onUseSuggestion={handleConflictUseSuggestion}
           onOverwrite={handleConflictOverwrite}
         />
+      )}
+
+      {lightbox && (
+        <div className="dialog-overlay" onClick={closeLightbox}>
+          <div className="lightbox-editor" onClick={e => e.stopPropagation()}>
+            <div className="lightbox-toolbar">
+              <span className="lightbox-label">
+                {lightbox.side === 'front' ? 'Front' : 'Back'} Image
+                {lightboxRotation !== 0 && <span className="rotation-preview-badge">{lightboxRotation}°</span>}
+              </span>
+              <div className="lightbox-rotate-controls">
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 90)} title="Rotate 90° left" disabled={lightboxCropMode}>
+                  ↺ 90°
+                </button>
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 90)} title="Rotate 90° right" disabled={lightboxCropMode}>
+                  ↻ 90°
+                </button>
+                <input
+                  type="number"
+                  className="rotate-degrees-input"
+                  value={rotationDegrees}
+                  onChange={e => setRotationDegrees(Number(e.target.value))}
+                  min={-360}
+                  max={360}
+                  step={1}
+                  title="Custom rotation degrees"
+                  disabled={lightboxCropMode}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => { setLightboxRotation(prev => prev + rotationDegrees); setRotationDegrees(0); }}
+                  disabled={rotationDegrees === 0 || lightboxCropMode}
+                  title="Add custom rotation"
+                >
+                  <RotateCw size={14} /> Rotate
+                </button>
+              </div>
+              {lightboxRotation !== 0 && (
+                <button type="button" className="btn btn-sm btn-primary" onClick={applyLightboxRotation} title="Commit rotation">
+                  Apply Rotation
+                </button>
+              )}
+              <button
+                type="button"
+                className={`btn btn-sm ${lightboxCropMode ? 'btn-accent' : 'btn-secondary'}`}
+                onClick={() => {
+                  setLightboxCropMode(prev => !prev);
+                  setLightboxCropRect(null);
+                }}
+                title={lightboxRotation !== 0 ? 'Apply rotation first' : 'Crop'}
+                disabled={lightboxRotation !== 0}
+              >
+                <Crop size={16} /> {lightboxCropMode ? 'Cancel Crop' : 'Crop'}
+              </button>
+              {lightboxCropMode && lightboxCropRect &&
+                Math.abs(lightboxCropRect.endX - lightboxCropRect.startX) > 10 &&
+                Math.abs(lightboxCropRect.endY - lightboxCropRect.startY) > 10 && (
+                <button type="button" className="btn btn-sm btn-primary" onClick={handleLightboxCropConfirm}>
+                  Apply Crop
+                </button>
+              )}
+              <button type="button" className="btn btn-sm btn-ghost" onClick={closeLightbox} style={{ marginLeft: 'auto' }}>✕</button>
+            </div>
+            {lightboxCropMode ? (
+              <div className="lightbox-canvas-wrap">
+                <canvas
+                  ref={lightboxCanvasRef}
+                  onMouseDown={e => {
+                    const rect = lightboxCanvasRef.current!.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    setLightboxCropRect({ startX: x, startY: y, endX: x, endY: y });
+                    setLightboxDrawing(true);
+                  }}
+                  onMouseMove={e => {
+                    if (!lightboxDrawing || !lightboxCropRect) return;
+                    const rect = lightboxCanvasRef.current!.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const updated = { ...lightboxCropRect, endX: x, endY: y };
+                    setLightboxCropRect(updated);
+                    drawLightboxCanvas(updated);
+                  }}
+                  onMouseUp={() => setLightboxDrawing(false)}
+                  onMouseLeave={() => setLightboxDrawing(false)}
+                  className="crop-canvas"
+                />
+              </div>
+            ) : (
+              <img
+                src={lightbox.src}
+                alt="Full size preview"
+                className="lightbox-image"
+                style={lightboxRotation !== 0 ? { transform: `rotate(${lightboxRotation}deg)` } : undefined}
+              />
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
