@@ -7,6 +7,7 @@ import { CONDITIONS } from '../types';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { useTokenUsage } from '../contexts/TokenUsageContext';
+import { useLocalStorage } from '../hooks';
 import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
 
 type PageLayout = '3x3' | '6x3';
@@ -44,7 +45,7 @@ function buildEmptyGrid(cols: number): CellForm[][] {
 export default function BulkEntry() {
   const navigate = useNavigate();
   const [layout, setLayout] = useState<PageLayout>('3x3');
-  const [binderNumber, setBinderNumber] = useState(1);
+  const [binderNumber, setBinderNumber] = useLocalStorage('bulk-binder-number', 1);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageImage, setPageImage] = useState<File | null>(null);
   const [pageImagePreview, setPageImagePreview] = useState<string | null>(null);
