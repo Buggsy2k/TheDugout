@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, ImageIcon } from 'lucide-react';
+import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, ImageIcon, Eye } from 'lucide-react';
 import { cardApi, pageApi, aiApi, binderApi, API_BASE } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import ImageCropDialog from '../components/ImageCropDialog';
@@ -73,6 +73,8 @@ export default function BulkEntry() {
   );
   const [cropTarget, setCropTarget] = useState<{ row: number; col: number; side: 'front' | 'back' } | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [mosaicSide, setMosaicSide] = useState<'front' | 'back'>('front');
+  const [showMosaic, setShowMosaic] = useState(false);
 
   // Auto-extracted image paths per cell (populated after AI scan)
   const [extractedImages, setExtractedImages] = useState<({ front?: string; back?: string } | null)[][]>(
@@ -624,6 +626,61 @@ export default function BulkEntry() {
           </div>
         </div>
       </div>
+
+      {/* Composite mosaic of all extracted images */}
+      {extractedImages.some(row => row.some(c => c !== null)) && (
+        <div className="mosaic-section">
+          <div className="mosaic-header">
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={() => setShowMosaic(!showMosaic)}
+            >
+              <Eye size={16} /> {showMosaic ? 'Hide' : 'Show'} Extraction Overview
+            </button>
+            {showMosaic && (
+              <div className="mosaic-toggle">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mosaicSide === 'front' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setMosaicSide('front')}
+                >
+                  Fronts
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mosaicSide === 'back' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setMosaicSide('back')}
+                >
+                  Backs
+                </button>
+              </div>
+            )}
+          </div>
+          {showMosaic && (
+            <div className={`mosaic-grid mosaic-cols-${numCols}`}>
+              {extractedImages.flatMap((row, ri) =>
+                row.map((cell, ci) => {
+                  const cropped = mosaicSide === 'front' ? croppedImages[ri]?.[ci] : croppedBackImages[ri]?.[ci];
+                  const extractedPath = mosaicSide === 'front' ? cell?.front : cell?.back;
+                  const src = cropped
+                    ? cropped.previewUrl
+                    : extractedPath ? `${API_BASE}${extractedPath}` : null;
+                  return (
+                    <div key={`${ri}-${ci}`} className={`mosaic-cell${!src ? ' mosaic-cell-empty' : ''}`}>
+                      {src ? (
+                        <img src={src} alt={`R${ri + 1}C${ci + 1}`} onClick={() => setLightboxSrc(src)} />
+                      ) : (
+                        <span className="mosaic-cell-label">R{ri + 1}C{ci + 1}</span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bulk-grid">
         {cells.map((row, ri) => (
