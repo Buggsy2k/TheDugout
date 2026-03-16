@@ -2,17 +2,24 @@ using OpenCvSharp;
 
 namespace TheDugout.Api.Services;
 
+public class ExtractionParams
+{
+    public int CannyLow { get; set; } = 30;
+    public int CannyHigh { get; set; } = 100;
+    public int BlurSize { get; set; } = 5;
+    public int MorphIterations { get; set; } = 2;
+    public float ContourPadding { get; set; } = 0.02f;
+    public float FallbackMargin { get; set; } = 0.03f;
+    public double MinCardAreaRatio { get; set; } = 0.25;
+    public double MinAspectRatio { get; set; } = 0.45;
+    public double MaxAspectRatio { get; set; } = 0.95;
+}
+
 public class CardImageExtractionService
 {
     private readonly ILogger<CardImageExtractionService> _logger;
 
-    private const float FallbackMarginPercent = 0.03f;
-    // Percentage to expand detected card quad outward so edges/text aren't clipped
-    private const float ContourPaddingPercent = 0.02f;
     private const int OutputQuality = 97;
-    // Card must occupy at least 25% of its grid cell to be detected
-    private const double MinCardAreaRatio = 0.25;
-    // Minimum edge density (fraction of edge pixels) to consider a cell occupied
     private const double MinEdgeDensity = 0.02;
 
     public CardImageExtractionService(ILogger<CardImageExtractionService> logger)
@@ -26,8 +33,9 @@ public class CardImageExtractionService
     /// Falls back to margin-based crop when contour detection fails.
     /// </summary>
     public async Task<Dictionary<(int row, int col), string>> ExtractCardsFromPageAsync(
-        byte[] imageBytes, string layout, string uploadsPath, int binderNumber, int pageNumber, string side = "front")
+        byte[] imageBytes, string layout, string uploadsPath, int binderNumber, int pageNumber, string side = "front", ExtractionParams? extractionParams = null)
     {
+        var p = extractionParams ?? new ExtractionParams();
         var results = new Dictionary<(int row, int col), string>();
         var rows = 3;
         var cols = layout == "6x3" ? 6 : 3;
@@ -57,7 +65,7 @@ public class CardImageExtractionService
                     continue;
                 }
 
-                using var cardImage = ExtractCardFromCell(cell);
+                using var cardImage = ExtractCardFromCell(cell, p);
 
                 var fileName = $"b{binderNumber}_p{pageNumber}_r{r + 1}c{c + 1}_{side}_{Guid.NewGuid():N}.jpg";
                 var filePath = Path.Combine(dir, fileName);
@@ -119,17 +127,17 @@ public class CardImageExtractionService
     /// Attempts contour-based card detection within a grid cell.
     /// Falls back to simple margin crop if no good quadrilateral is found.
     /// </summary>
-    private Mat ExtractCardFromCell(Mat cell)
+    private Mat ExtractCardFromCell(Mat cell, ExtractionParams p)
     {
-        var quad = FindCardContour(cell);
+        var quad = FindCardContour(cell, p);
         if (quad != null)
         {
-            var padded = ExpandQuad(quad, cell.Width, cell.Height, ContourPaddingPercent);
+            var padded = ExpandQuad(quad, cell.Width, cell.Height, p.ContourPadding);
             var result = PerspectiveCorrect(cell, padded);
             if (result != null)
                 return result;
         }
-        return FallbackCrop(cell);
+        return FallbackCrop(cell, p.FallbackMargin);
     }
 
     /// <summary>
@@ -160,25 +168,26 @@ public class CardImageExtractionService
     /// Finds the largest convex quadrilateral in the cell that could be a card.
     /// Uses Gaussian blur + Canny edges with moderate morphological closing.
     /// </summary>
-    private Point2f[]? FindCardContour(Mat cell)
+    private Point2f[]? FindCardContour(Mat cell, ExtractionParams p)
     {
         using var gray = new Mat();
         Cv2.CvtColor(cell, gray, ColorConversionCodes.BGR2GRAY);
 
         using var blurred = new Mat();
-        Cv2.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+        var bs = Math.Max(3, p.BlurSize | 1); // must be odd
+        Cv2.GaussianBlur(gray, blurred, new Size(bs, bs), 0);
 
         using var edges = new Mat();
-        Cv2.Canny(blurred, edges, 30, 100);
+        Cv2.Canny(blurred, edges, p.CannyLow, p.CannyHigh);
 
         using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(3, 3));
         using var closed = new Mat();
-        Cv2.MorphologyEx(edges, closed, MorphTypes.Close, kernel, iterations: 2);
+        Cv2.MorphologyEx(edges, closed, MorphTypes.Close, kernel, iterations: Math.Max(1, p.MorphIterations));
 
         Cv2.FindContours(closed, out var contours, out _, RetrievalModes.External,
             ContourApproximationModes.ApproxSimple);
 
-        var minArea = cell.Width * cell.Height * MinCardAreaRatio;
+        var minArea = cell.Width * cell.Height * p.MinCardAreaRatio;
         Point2f[]? bestQuad = null;
         double bestArea = 0;
 
@@ -196,7 +205,7 @@ public class CardImageExtractionService
                 if (approx.Length == 4 && Cv2.IsContourConvex(approx))
                 {
                     var quad = OrderQuadPoints(approx.Select(p => new Point2f(p.X, p.Y)).ToArray());
-                    if (IsCardAspectRatio(quad))
+                    if (IsCardAspectRatio(quad, p.MinAspectRatio, p.MaxAspectRatio))
                     {
                         bestArea = area;
                         bestQuad = quad;
@@ -212,7 +221,7 @@ public class CardImageExtractionService
     /// <summary>
     /// Validates that a quadrilateral has roughly standard card proportions (2.5:3.5).
     /// </summary>
-    private static bool IsCardAspectRatio(Point2f[] quad)
+    private static bool IsCardAspectRatio(Point2f[] quad, double minRatio, double maxRatio)
     {
         var widthTop = Distance(quad[0], quad[1]);
         var widthBottom = Distance(quad[3], quad[2]);
@@ -224,10 +233,8 @@ public class CardImageExtractionService
 
         if (avgWidth < 10 || avgHeight < 10) return false;
 
-        // Aspect ratio: card is 2.5" x 3.5" = 0.714 ratio
-        // Allow wide tolerance (0.5 to 0.95) for sleeve padding variations
         var ratio = Math.Min(avgWidth, avgHeight) / Math.Max(avgWidth, avgHeight);
-        return ratio >= 0.45 && ratio <= 0.95;
+        return ratio >= minRatio && ratio <= maxRatio;
     }
 
     /// <summary>
@@ -284,10 +291,10 @@ public class CardImageExtractionService
     /// <summary>
     /// Simple margin-based crop as fallback when contour detection fails.
     /// </summary>
-    private static Mat FallbackCrop(Mat cell)
+    private static Mat FallbackCrop(Mat cell, float marginPercent)
     {
-        var marginX = (int)(cell.Width * FallbackMarginPercent);
-        var marginY = (int)(cell.Height * FallbackMarginPercent);
+        var marginX = (int)(cell.Width * marginPercent);
+        var marginY = (int)(cell.Height * marginPercent);
 
         var w = cell.Width - 2 * marginX;
         var h = cell.Height - 2 * marginY;

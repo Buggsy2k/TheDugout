@@ -130,12 +130,12 @@ export const pageApi = {
     }).then(r => r.data);
   },
 
-  extractCards(file: File, layout: '3x3' | '6x3', binderNumber: number, pageNumber: number, side: 'front' | 'back' = 'front'): Promise<ExtractedCardImage[]> {
+  extractCards(file: File, layout: '3x3' | '6x3', binderNumber: number, pageNumber: number, side: 'front' | 'back' = 'front', extractionParams?: Record<string, number>): Promise<ExtractedCardImage[]> {
     const formData = new FormData();
     formData.append('file', file);
     return api.post('/pages/extract-cards', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      params: { layout, binderNumber, pageNumber, side },
+      params: { layout, binderNumber, pageNumber, side, ...extractionParams },
     }).then(r => r.data);
   },
 

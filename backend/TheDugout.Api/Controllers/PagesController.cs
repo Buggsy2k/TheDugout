@@ -70,7 +70,16 @@ public class PagesController : ControllerBase
         [FromQuery] string layout = "3x3",
         [FromQuery] int binderNumber = 1,
         [FromQuery] int pageNumber = 1,
-        [FromQuery] string side = "front")
+        [FromQuery] string side = "front",
+        [FromQuery] int? cannyLow = null,
+        [FromQuery] int? cannyHigh = null,
+        [FromQuery] int? blurSize = null,
+        [FromQuery] int? morphIterations = null,
+        [FromQuery] float? contourPadding = null,
+        [FromQuery] float? fallbackMargin = null,
+        [FromQuery] double? minCardAreaRatio = null,
+        [FromQuery] double? minAspectRatio = null,
+        [FromQuery] double? maxAspectRatio = null)
     {
         if (file == null || file.Length == 0)
             return BadRequest("No file uploaded");
@@ -93,8 +102,20 @@ public class PagesController : ControllerBase
         if (ImageConversionHelper.IsTiff(ext))
             imageBytes = ImageConversionHelper.ConvertTiffToPng(imageBytes);
         var uploadsPath = _config["UploadsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+
+        var extractionParams = new ExtractionParams();
+        if (cannyLow.HasValue) extractionParams.CannyLow = cannyLow.Value;
+        if (cannyHigh.HasValue) extractionParams.CannyHigh = cannyHigh.Value;
+        if (blurSize.HasValue) extractionParams.BlurSize = blurSize.Value;
+        if (morphIterations.HasValue) extractionParams.MorphIterations = morphIterations.Value;
+        if (contourPadding.HasValue) extractionParams.ContourPadding = contourPadding.Value;
+        if (fallbackMargin.HasValue) extractionParams.FallbackMargin = fallbackMargin.Value;
+        if (minCardAreaRatio.HasValue) extractionParams.MinCardAreaRatio = minCardAreaRatio.Value;
+        if (minAspectRatio.HasValue) extractionParams.MinAspectRatio = minAspectRatio.Value;
+        if (maxAspectRatio.HasValue) extractionParams.MaxAspectRatio = maxAspectRatio.Value;
+
         var extracted = await _extractionService.ExtractCardsFromPageAsync(
-            imageBytes, layout, uploadsPath, binderNumber, pageNumber, side);
+            imageBytes, layout, uploadsPath, binderNumber, pageNumber, side, extractionParams);
 
         // Map row/col keys to serializable format
         var result = extracted.Select(kvp => new

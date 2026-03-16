@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, ImageIcon, Eye } from 'lucide-react';
+import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, Eye } from 'lucide-react';
 import { cardApi, pageApi, aiApi, binderApi, API_BASE } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import ImageCropDialog from '../components/ImageCropDialog';
@@ -10,6 +10,15 @@ import { useLocalStorage } from '../hooks';
 import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
 
 type PageLayout = '3x3' | '6x3';
+
+const DEFAULT_EXTRACTION_PARAMS = {
+  cannyLow: 30, cannyHigh: 100, blurSize: 5, morphIterations: 2,
+  contourPadding: 0.02, fallbackMargin: 0.03, minCardAreaRatio: 0.25,
+  minAspectRatio: 0.45, maxAspectRatio: 0.95,
+};
+
+type ExtractionParams = typeof DEFAULT_EXTRACTION_PARAMS;
+interface ExtractionPreset { name: string; params: ExtractionParams; }
 
 interface CellForm {
   playerName: string;
@@ -53,6 +62,47 @@ export default function BulkEntry() {
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [extracting, setExtracting] = useState(false);
+
+  // Extraction tuning params (persists last-used settings)
+  const [showExtractionSettings, setShowExtractionSettings] = useState(false);
+  const [extractionParams, setExtractionParams] = useLocalStorage<ExtractionParams>(
+    'bulk-extraction-params', DEFAULT_EXTRACTION_PARAMS
+  );
+  const [extractionPresets, setExtractionPresets] = useLocalStorage<ExtractionPreset[]>(
+    'bulk-extraction-presets', []
+  );
+  const [selectedPresetName, setSelectedPresetName] = useState('');
+
+  const updateExtractionParam = (key: keyof ExtractionParams, value: number) => {
+    setExtractionParams(prev => ({ ...prev, [key]: value }));
+    setSelectedPresetName('');
+  };
+
+  const savePreset = () => {
+    const name = prompt('Preset name:');
+    if (!name?.trim()) return;
+    const trimmed = name.trim();
+    setExtractionPresets(prev => {
+      const filtered = prev.filter(p => p.name !== trimmed);
+      return [...filtered, { name: trimmed, params: { ...extractionParams } }];
+    });
+    setSelectedPresetName(trimmed);
+  };
+
+  const loadPreset = (name: string) => {
+    if (!name) { setSelectedPresetName(''); return; }
+    const preset = extractionPresets.find(p => p.name === name);
+    if (preset) {
+      setExtractionParams(preset.params);
+      setSelectedPresetName(name);
+    }
+  };
+
+  const deletePreset = () => {
+    if (!selectedPresetName) return;
+    setExtractionPresets(prev => prev.filter(p => p.name !== selectedPresetName));
+    setSelectedPresetName('');
+  };
 
   // Conflict dialog state
   const [conflictCards, setConflictCards] = useState<Card[]>([]);
@@ -410,11 +460,14 @@ export default function BulkEntry() {
   const extractCardImages = async () => {
     if (!pageImage) return;
     setExtracting(true);
+    // Clear manual crops so re-extracted images are visible
+    setCroppedImages(Array.from({ length: 3 }, () => Array.from({ length: numCols }, () => null)));
+    setCroppedBackImages(Array.from({ length: 3 }, () => Array.from({ length: numCols }, () => null)));
     try {
-      const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front');
+      const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front', extractionParams);
       let backExtracts: ExtractedCardImage[] = [];
       if (backImage) {
-        backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back');
+        backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back', extractionParams);
       }
       setExtractedImages(() => {
         const fresh: ({ front?: string; back?: string } | null)[][] =
@@ -448,6 +501,51 @@ export default function BulkEntry() {
       setExtracting(false);
     }
   };
+
+  // Auto-extract card images when front or back page image changes
+  useEffect(() => {
+    if (!pageImage) return;
+    const extract = async () => {
+      setExtracting(true);
+      try {
+        const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front', extractionParams);
+        let backExtracts: ExtractedCardImage[] = [];
+        if (backImage) {
+          backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back', extractionParams);
+        }
+        setExtractedImages(() => {
+          const fresh: ({ front?: string; back?: string } | null)[][] =
+            Array.from({ length: 3 }, () => Array.from({ length: numCols }, () => null));
+          for (const ext of frontExtracts) {
+            const ri = ext.row - 1;
+            const ci = ext.column - 1;
+            if (ri >= 0 && ri < 3 && ci >= 0 && ci < numCols) {
+              fresh[ri][ci] = { ...fresh[ri][ci], front: ext.imagePath };
+            }
+          }
+          const colsPerPage = 3;
+          for (const ext of backExtracts) {
+            const ri = ext.row - 1;
+            const physicalCol = ext.column - 1;
+            const pageOffset = physicalCol >= colsPerPage ? colsPerPage : 0;
+            const localCol = physicalCol - pageOffset;
+            const mirroredCol = (colsPerPage - 1 - localCol) + pageOffset;
+            if (ri >= 0 && ri < 3 && mirroredCol >= 0 && mirroredCol < numCols) {
+              fresh[ri][mirroredCol] = { ...fresh[ri][mirroredCol], back: ext.imagePath };
+            }
+          }
+          return fresh;
+        });
+        const frontCount = frontExtracts.length;
+        toast.success(`Extracted ${frontCount} card image${frontCount !== 1 ? 's' : ''}${backExtracts.length > 0 ? ' (front + back)' : ''}`);
+      } catch {
+        toast.error('Image extraction failed');
+      } finally {
+        setExtracting(false);
+      }
+    };
+    extract();
+  }, [pageImage, backImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleScanWithAi = async () => {
     if (!pageImage) {
@@ -777,16 +875,6 @@ export default function BulkEntry() {
             <>
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={extractCardImages}
-                disabled={extracting || scanning}
-                style={{ marginBottom: '0.5rem' }}
-              >
-                <ImageIcon size={16} />
-                {extracting ? 'Extracting...' : 'Extract Card Images'}
-              </button>
-              <button
-                type="button"
                 className="btn btn-accent btn-ai"
                 onClick={handleScanWithAi}
                 disabled={scanning || extracting}
@@ -815,6 +903,99 @@ export default function BulkEntry() {
           </div>
         </div>
       </div>
+
+      {/* Extraction Settings */}
+      {pageImage && (
+        <div className="extraction-settings-section">
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => setShowExtractionSettings(!showExtractionSettings)}
+          >
+            {showExtractionSettings ? '▾ Hide' : '▸ Show'} Extraction Settings
+          </button>
+          {showExtractionSettings && (
+            <div className="extraction-settings-grid">
+              <div className="extraction-setting">
+                <label>Canny Low <span className="hint">({extractionParams.cannyLow})</span></label>
+                <input type="range" min={5} max={150} step={5} value={extractionParams.cannyLow}
+                  onChange={e => updateExtractionParam('cannyLow', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Canny High <span className="hint">({extractionParams.cannyHigh})</span></label>
+                <input type="range" min={30} max={300} step={5} value={extractionParams.cannyHigh}
+                  onChange={e => updateExtractionParam('cannyHigh', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Blur Size <span className="hint">({extractionParams.blurSize})</span></label>
+                <input type="range" min={1} max={15} step={2} value={extractionParams.blurSize}
+                  onChange={e => updateExtractionParam('blurSize', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Morph Iterations <span className="hint">({extractionParams.morphIterations})</span></label>
+                <input type="range" min={1} max={5} step={1} value={extractionParams.morphIterations}
+                  onChange={e => updateExtractionParam('morphIterations', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Contour Padding <span className="hint">({(extractionParams.contourPadding * 100).toFixed(0)}%)</span></label>
+                <input type="range" min={0} max={0.1} step={0.005} value={extractionParams.contourPadding}
+                  onChange={e => updateExtractionParam('contourPadding', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Fallback Margin <span className="hint">({(extractionParams.fallbackMargin * 100).toFixed(0)}%)</span></label>
+                <input type="range" min={0} max={0.15} step={0.005} value={extractionParams.fallbackMargin}
+                  onChange={e => updateExtractionParam('fallbackMargin', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Min Card Area <span className="hint">({(extractionParams.minCardAreaRatio * 100).toFixed(0)}%)</span></label>
+                <input type="range" min={0.1} max={0.5} step={0.05} value={extractionParams.minCardAreaRatio}
+                  onChange={e => updateExtractionParam('minCardAreaRatio', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Min Aspect Ratio <span className="hint">({extractionParams.minAspectRatio.toFixed(2)})</span></label>
+                <input type="range" min={0.2} max={0.8} step={0.05} value={extractionParams.minAspectRatio}
+                  onChange={e => updateExtractionParam('minAspectRatio', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting">
+                <label>Max Aspect Ratio <span className="hint">({extractionParams.maxAspectRatio.toFixed(2)})</span></label>
+                <input type="range" min={0.7} max={1.0} step={0.05} value={extractionParams.maxAspectRatio}
+                  onChange={e => updateExtractionParam('maxAspectRatio', Number(e.target.value))} />
+              </div>
+              <div className="extraction-setting extraction-preset-actions">
+                <select
+                  value={selectedPresetName}
+                  onChange={e => loadPreset(e.target.value)}
+                  className="preset-select"
+                >
+                  <option value="">— Presets —</option>
+                  {extractionPresets.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+                <button type="button" className="btn btn-sm btn-secondary" onClick={savePreset} title="Save current settings as preset">
+                  Save
+                </button>
+                {selectedPresetName && (
+                  <button type="button" className="btn btn-sm btn-danger" onClick={deletePreset} title="Delete selected preset">
+                    Delete
+                  </button>
+                )}
+              </div>
+              <div className="extraction-setting extraction-setting-actions">
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => {
+                  setExtractionParams(DEFAULT_EXTRACTION_PARAMS);
+                  setSelectedPresetName('');
+                }}>
+                  Reset Defaults
+                </button>
+                <button type="button" className="btn btn-sm btn-primary" onClick={extractCardImages} disabled={extracting}>
+                  {extracting ? 'Re-extracting...' : 'Re-extract with Settings'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Composite mosaic of all extracted images */}
       {extractedImages.some(row => row.some(c => c !== null)) && (
