@@ -20,7 +20,10 @@ public class CardImageExtractionService
     private readonly ILogger<CardImageExtractionService> _logger;
 
     private const int OutputQuality = 97;
-    private const double MinEdgeDensity = 0.02;
+    private const double MinEdgeDensity = 0.008;
+    private const double MinStdDev = 8;
+    /// Padding added around the detected card bounding box (percentage of cell dimensions)
+    private const float BoundingPadding = 0.04f;
 
     public CardImageExtractionService(ILogger<CardImageExtractionService> logger)
     {
@@ -29,7 +32,7 @@ public class CardImageExtractionService
 
     /// <summary>
     /// Extracts individual card images from a binder page photo.
-    /// Uses OpenCV contour detection + perspective correction to handle skew.
+    /// Uses OpenCV contour detection with axis-aligned bounding rect (no perspective warp).
     /// Falls back to margin-based crop when contour detection fails.
     /// </summary>
     public async Task<Dictionary<(int row, int col), string>> ExtractCardsFromPageAsync(
@@ -89,106 +92,177 @@ public class CardImageExtractionService
     /// Detects whether a grid cell is empty (no card present).
     /// Uses edge density and color variance — a real card has printed content
     /// that produces many edges and higher color variation than an empty sleeve pocket.
+    /// Runs two passes: raw and CLAHE-enhanced, so faded cards aren't missed.
     /// </summary>
     private bool IsCellEmpty(Mat cell)
     {
         using var gray = new Mat();
         Cv2.CvtColor(cell, gray, ColorConversionCodes.BGR2GRAY);
 
+        // Check color variance first — empty pockets have very uniform color
+        Cv2.MeanStdDev(gray, out _, out var stdDev);
+        if (stdDev[0] < MinStdDev)
+        {
+            _logger.LogDebug("Cell stddev {StdDev:F1} below threshold", stdDev[0]);
+            return true;
+        }
+
         using var blurred = new Mat();
         Cv2.GaussianBlur(gray, blurred, new Size(5, 5), 0);
 
-        // Check edge density — cards have printed text/graphics that produce many edges
+        // Pass 1: raw edges
         using var edges = new Mat();
         Cv2.Canny(blurred, edges, 50, 150);
         var edgePixels = Cv2.CountNonZero(edges);
         var totalPixels = edges.Rows * edges.Cols;
         var edgeDensity = (double)edgePixels / totalPixels;
 
-        if (edgeDensity < MinEdgeDensity)
-        {
-            _logger.LogDebug("Cell edge density {Density:F4} below threshold {Threshold}",
-                edgeDensity, MinEdgeDensity);
-            return true;
-        }
+        if (edgeDensity >= MinEdgeDensity)
+            return false;
 
-        // Check color variance — empty pockets have very uniform color
-        Cv2.MeanStdDev(gray, out _, out var stdDev);
-        if (stdDev[0] < 15)
-        {
-            _logger.LogDebug("Cell stddev {StdDev:F1} below threshold", stdDev[0]);
-            return true;
-        }
+        // Pass 2: CLAHE-enhanced edges for faded/low-contrast cards
+        using var clahe = Cv2.CreateCLAHE(clipLimit: 3.0, tileGridSize: new Size(8, 8));
+        using var enhanced = new Mat();
+        clahe.Apply(blurred, enhanced);
+        using var edgesEnhanced = new Mat();
+        Cv2.Canny(enhanced, edgesEnhanced, 30, 100);
+        var enhancedEdgePixels = Cv2.CountNonZero(edgesEnhanced);
+        var enhancedDensity = (double)enhancedEdgePixels / totalPixels;
 
-        return false;
+        if (enhancedDensity >= MinEdgeDensity)
+            return false;
+
+        _logger.LogDebug("Cell edge density {Density:F4} (enhanced: {Enhanced:F4}) below threshold {Threshold}",
+            edgeDensity, enhancedDensity, MinEdgeDensity);
+        return true;
     }
 
     /// <summary>
     /// Attempts contour-based card detection within a grid cell.
-    /// Falls back to simple margin crop if no good quadrilateral is found.
+    /// Uses axis-aligned bounding rect (no perspective warp) since cards are flat.
+    /// Falls back to simple margin crop if no good contour is found.
     /// </summary>
     private Mat ExtractCardFromCell(Mat cell, ExtractionParams p)
     {
-        var quad = FindCardContour(cell, p);
-        if (quad != null)
+        var rect = FindCardBounds(cell, p);
+        if (rect != null)
         {
-            var padded = ExpandQuad(quad, cell.Width, cell.Height, p.ContourPadding);
-            var result = PerspectiveCorrect(cell, padded);
-            if (result != null)
-                return result;
+            var padded = PadRect(rect.Value, cell.Width, cell.Height, BoundingPadding);
+            if (padded.Width >= 50 && padded.Height >= 50)
+            {
+                using var cropped = new Mat(cell, padded);
+                return cropped.Clone();
+            }
         }
         return FallbackCrop(cell, p.FallbackMargin);
     }
 
     /// <summary>
-    /// Expands a quadrilateral outward from its center by a percentage so the
-    /// resulting crop includes a small border around the card edges.
-    /// Points are clamped to the cell bounds.
+    /// Pads a rectangle outward by a percentage of the cell dimensions,
+    /// clamped to cell bounds.
     /// </summary>
-    private static Point2f[] ExpandQuad(Point2f[] quad, int maxW, int maxH, float pct)
+    private static Rect PadRect(Rect r, int maxW, int maxH, float pct)
     {
-        var cx = quad.Average(p => p.X);
-        var cy = quad.Average(p => p.Y);
-
-        var expanded = new Point2f[4];
-        for (int i = 0; i < 4; i++)
-        {
-            var dx = quad[i].X - cx;
-            var dy = quad[i].Y - cy;
-            var nx = quad[i].X + dx * pct;
-            var ny = quad[i].Y + dy * pct;
-            expanded[i] = new Point2f(
-                Math.Clamp(nx, 0, maxW - 1),
-                Math.Clamp(ny, 0, maxH - 1));
-        }
-        return expanded;
+        var padX = (int)(maxW * pct);
+        var padY = (int)(maxH * pct);
+        var x = Math.Max(0, r.X - padX);
+        var y = Math.Max(0, r.Y - padY);
+        var right = Math.Min(maxW, r.X + r.Width + padX);
+        var bottom = Math.Min(maxH, r.Y + r.Height + padY);
+        return new Rect(x, y, right - x, bottom - y);
     }
 
     /// <summary>
-    /// Finds the largest convex quadrilateral in the cell that could be a card.
-    /// Uses Gaussian blur + Canny edges with moderate morphological closing.
+    /// Finds the bounding rectangle of the card within a grid cell.
+    /// Runs multiple detection passes with increasing enhancement for faded cards.
+    /// Returns an axis-aligned bounding rect (no perspective warp).
     /// </summary>
-    private Point2f[]? FindCardContour(Mat cell, ExtractionParams p)
+    private Rect? FindCardBounds(Mat cell, ExtractionParams p)
     {
         using var gray = new Mat();
         Cv2.CvtColor(cell, gray, ColorConversionCodes.BGR2GRAY);
 
+        var bs = Math.Max(3, p.BlurSize | 1);
         using var blurred = new Mat();
-        var bs = Math.Max(3, p.BlurSize | 1); // must be odd
         Cv2.GaussianBlur(gray, blurred, new Size(bs, bs), 0);
 
+        // Pass 1: standard Canny on raw grayscale
+        var result = FindBoundsFromEdges(cell, blurred, p);
+        if (result != null) return result;
+
+        // Pass 2: CLAHE-enhanced for faded/low-contrast cards
+        using var clahe = Cv2.CreateCLAHE(clipLimit: 3.0, tileGridSize: new Size(8, 8));
+        using var enhanced = new Mat();
+        clahe.Apply(blurred, enhanced);
+        result = FindBoundsFromEdges(cell, enhanced, p);
+        if (result != null) return result;
+
+        // Pass 3: aggressive CLAHE + lower thresholds for very faded cards
+        using var claheStrong = Cv2.CreateCLAHE(clipLimit: 6.0, tileGridSize: new Size(4, 4));
+        using var strongEnhanced = new Mat();
+        claheStrong.Apply(blurred, strongEnhanced);
+        var softParams = new ExtractionParams
+        {
+            CannyLow = Math.Max(10, p.CannyLow / 2),
+            CannyHigh = Math.Max(30, p.CannyHigh / 2),
+            BlurSize = p.BlurSize,
+            MorphIterations = Math.Max(p.MorphIterations, 3),
+            ContourPadding = p.ContourPadding,
+            FallbackMargin = p.FallbackMargin,
+            MinCardAreaRatio = p.MinCardAreaRatio * 0.8,
+            MinAspectRatio = p.MinAspectRatio,
+            MaxAspectRatio = p.MaxAspectRatio,
+        };
+        result = FindBoundsFromEdges(cell, strongEnhanced, softParams);
+        if (result != null) return result;
+
+        // Pass 4: adaptive threshold for cases where Canny completely fails
+        using var adaptive = new Mat();
+        Cv2.AdaptiveThreshold(enhanced, adaptive, 255,
+            AdaptiveThresholdTypes.GaussianC, ThresholdTypes.Binary, 15, 4);
+        Cv2.BitwiseNot(adaptive, adaptive);
+        result = FindBoundsFromBinary(cell, adaptive, p);
+        return result;
+    }
+
+    /// <summary>
+    /// Finds card bounds from a preprocessed grayscale image using Canny edge detection.
+    /// </summary>
+    private Rect? FindBoundsFromEdges(Mat cell, Mat preprocessed, ExtractionParams p)
+    {
         using var edges = new Mat();
-        Cv2.Canny(blurred, edges, p.CannyLow, p.CannyHigh);
+        Cv2.Canny(preprocessed, edges, p.CannyLow, p.CannyHigh);
 
         using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(3, 3));
         using var closed = new Mat();
         Cv2.MorphologyEx(edges, closed, MorphTypes.Close, kernel, iterations: Math.Max(1, p.MorphIterations));
 
-        Cv2.FindContours(closed, out var contours, out _, RetrievalModes.External,
+        return FindBestBoundingRect(cell, closed, p);
+    }
+
+    /// <summary>
+    /// Finds card bounds from a binary (thresholded) image.
+    /// </summary>
+    private Rect? FindBoundsFromBinary(Mat cell, Mat binary, ExtractionParams p)
+    {
+        using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(3, 3));
+        using var closed = new Mat();
+        Cv2.MorphologyEx(binary, closed, MorphTypes.Close, kernel, iterations: Math.Max(1, p.MorphIterations));
+
+        return FindBestBoundingRect(cell, closed, p);
+    }
+
+    /// <summary>
+    /// Searches contours in a binary edge image for the largest card-shaped region.
+    /// Returns an axis-aligned bounding rectangle — no perspective warp.
+    /// </summary>
+    private Rect? FindBestBoundingRect(Mat cell, Mat edgeImage, ExtractionParams p)
+    {
+        Cv2.FindContours(edgeImage, out var contours, out _, RetrievalModes.External,
             ContourApproximationModes.ApproxSimple);
 
         var minArea = cell.Width * cell.Height * p.MinCardAreaRatio;
-        Point2f[]? bestQuad = null;
+        Rect? bestRect = null;
         double bestArea = 0;
 
         foreach (var contour in contours)
@@ -196,96 +270,16 @@ public class CardImageExtractionService
             var area = Cv2.ContourArea(contour);
             if (area < minArea || area <= bestArea) continue;
 
-            var peri = Cv2.ArcLength(contour, true);
-
-            // Try two epsilon values to handle slight sleeve distortion
-            foreach (var epsFactor in new[] { 0.02, 0.04 })
+            var rect = Cv2.BoundingRect(contour);
+            var aspectRatio = (double)Math.Min(rect.Width, rect.Height) / Math.Max(rect.Width, rect.Height);
+            if (aspectRatio >= p.MinAspectRatio && aspectRatio <= p.MaxAspectRatio)
             {
-                var approx = Cv2.ApproxPolyDP(contour, epsFactor * peri, true);
-                if (approx.Length == 4 && Cv2.IsContourConvex(approx))
-                {
-                    var quad = OrderQuadPoints(approx.Select(p => new Point2f(p.X, p.Y)).ToArray());
-                    if (IsCardAspectRatio(quad, p.MinAspectRatio, p.MaxAspectRatio))
-                    {
-                        bestArea = area;
-                        bestQuad = quad;
-                        break;
-                    }
-                }
+                bestArea = area;
+                bestRect = rect;
             }
         }
 
-        return bestQuad;
-    }
-
-    /// <summary>
-    /// Validates that a quadrilateral has roughly standard card proportions (2.5:3.5).
-    /// </summary>
-    private static bool IsCardAspectRatio(Point2f[] quad, double minRatio, double maxRatio)
-    {
-        var widthTop = Distance(quad[0], quad[1]);
-        var widthBottom = Distance(quad[3], quad[2]);
-        var heightLeft = Distance(quad[0], quad[3]);
-        var heightRight = Distance(quad[1], quad[2]);
-
-        var avgWidth = (widthTop + widthBottom) / 2;
-        var avgHeight = (heightLeft + heightRight) / 2;
-
-        if (avgWidth < 10 || avgHeight < 10) return false;
-
-        var ratio = Math.Min(avgWidth, avgHeight) / Math.Max(avgWidth, avgHeight);
-        return ratio >= minRatio && ratio <= maxRatio;
-    }
-
-    /// <summary>
-    /// Orders 4 points as: top-left, top-right, bottom-right, bottom-left.
-    /// Uses sum/difference heuristic standard in OpenCV literature.
-    /// </summary>
-    private static Point2f[] OrderQuadPoints(Point2f[] pts)
-    {
-        // Smallest sum (x+y) = top-left, largest = bottom-right
-        // Smallest difference (y-x) = top-right, largest = bottom-left
-        var indexed = pts.Select((p, i) => (p, i)).ToArray();
-
-        var tl = indexed.OrderBy(x => x.p.X + x.p.Y).First().p;
-        var br = indexed.OrderByDescending(x => x.p.X + x.p.Y).First().p;
-        var tr = indexed.OrderBy(x => x.p.Y - x.p.X).First().p;
-        var bl = indexed.OrderByDescending(x => x.p.Y - x.p.X).First().p;
-
-        return [tl, tr, br, bl];
-    }
-
-    /// <summary>
-    /// Applies perspective warp to straighten a detected card quadrilateral.
-    /// Uses bicubic interpolation for high quality output.
-    /// </summary>
-    private Mat? PerspectiveCorrect(Mat cell, Point2f[] quad)
-    {
-        var widthTop = Distance(quad[0], quad[1]);
-        var widthBottom = Distance(quad[3], quad[2]);
-        var outWidth = (int)Math.Max(widthTop, widthBottom);
-
-        var heightLeft = Distance(quad[0], quad[3]);
-        var heightRight = Distance(quad[1], quad[2]);
-        var outHeight = (int)Math.Max(heightLeft, heightRight);
-
-        if (outWidth < 50 || outHeight < 50)
-            return null;
-
-        var dst = new Point2f[]
-        {
-            new(0, 0),
-            new(outWidth - 1, 0),
-            new(outWidth - 1, outHeight - 1),
-            new(0, outHeight - 1)
-        };
-
-        using var transform = Cv2.GetPerspectiveTransform(quad, dst);
-        var warped = new Mat();
-        Cv2.WarpPerspective(cell, warped, transform, new Size(outWidth, outHeight),
-            InterpolationFlags.Cubic, BorderTypes.Replicate);
-
-        return warped;
+        return bestRect;
     }
 
     /// <summary>
@@ -304,12 +298,5 @@ public class CardImageExtractionService
 
         using var cropped = new Mat(cell, new Rect(marginX, marginY, w, h));
         return cropped.Clone();
-    }
-
-    private static float Distance(Point2f a, Point2f b)
-    {
-        var dx = a.X - b.X;
-        var dy = a.Y - b.Y;
-        return MathF.Sqrt(dx * dx + dy * dy);
     }
 }

@@ -73,7 +73,16 @@ Directory.CreateDirectory(uploadsPath);
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(uploadsPath),
-    RequestPath = "/uploads"
+    RequestPath = "/uploads",
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers.CacheControl = "no-cache";
+        // Always include CORS header so images work in canvas/fetch contexts
+        if (!ctx.Context.Response.Headers.ContainsKey("Access-Control-Allow-Origin"))
+        {
+            ctx.Context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+        }
+    }
 });
 
 app.UseAuthorization();

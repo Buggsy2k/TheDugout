@@ -1,15 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, Eye } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, Eye, ImagePlus, RefreshCw } from 'lucide-react';
 import { cardApi, pageApi, aiApi, binderApi, API_BASE } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import ImageCropDialog from '../components/ImageCropDialog';
 import { CONDITIONS } from '../types';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLocalStorage } from '../hooks';
+import { useLightboxCrop } from '../hooks/useLightboxCrop';
 import ConflictOverwriteDialog from '../components/ConflictOverwriteDialog';
 
 type PageLayout = '3x3' | '6x3';
+type EntryMode = 'new' | 'update-images';
 
 const DEFAULT_EXTRACTION_PARAMS = {
   cannyLow: 30, cannyHigh: 100, blurSize: 5, morphIterations: 2,
@@ -52,9 +54,14 @@ function buildEmptyGrid(cols: number): CellForm[][] {
 
 export default function BulkEntry() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const paramBinder = searchParams.get('binder');
+  const paramPage = searchParams.get('page');
+  const paramMode = searchParams.get('mode');
+  const [mode, setMode] = useState<EntryMode>(paramMode === 'update-images' ? 'update-images' : 'new');
   const [layout, setLayout] = useState<PageLayout>('3x3');
-  const [binderNumber, setBinderNumber] = useLocalStorage('bulk-binder-number', 1);
-  const [pageNumber, setPageNumber] = useState(1);
+  const [binderNumber, setBinderNumber] = useLocalStorage('bulk-binder-number', paramBinder ? parseInt(paramBinder) || 1 : 1);
+  const [pageNumber, setPageNumber] = useState(paramPage ? parseInt(paramPage) || 1 : 1);
   const [pageImage, setPageImage] = useState<File | null>(null);
   const [pageImagePreview, setPageImagePreview] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<File | null>(null);
@@ -124,11 +131,7 @@ export default function BulkEntry() {
   const [lightbox, setLightbox] = useState<{ src: string; row: number; col: number; side: 'front' | 'back' } | null>(null);
   const [lightboxRotation, setLightboxRotation] = useState(0);
   const [lightboxCropMode, setLightboxCropMode] = useState(false);
-  const [lightboxCropRect, setLightboxCropRect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
-  const [lightboxDrawing, setLightboxDrawing] = useState(false);
-  const lightboxCanvasRef = useRef<HTMLCanvasElement>(null);
-  const lightboxImgRef = useRef<HTMLImageElement | null>(null);
-  const lightboxScaleRef = useRef(1);
+  const lbCrop = useLightboxCrop();
   const [rotationDegrees, setRotationDegrees] = useState(0);
   const [mosaicSide, setMosaicSide] = useState<'front' | 'back'>('front');
   const [showMosaic, setShowMosaic] = useState(false);
@@ -142,17 +145,35 @@ export default function BulkEntry() {
   const [defaultYear, setDefaultYear] = useState('');
   const [defaultManufacturer, setDefaultManufacturer] = useState('');
 
+  // Update-images mode: existing cards on the page
+  const [existingCards, setExistingCards] = useState<Card[]>([]);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+
   const [binderTotalPages, setBinderTotalPages] = useState<number | null>(null);
   const [binderAtCapacity, setBinderAtCapacity] = useState(false);
   const isInitialMount = useRef(true);
+  const skipNextBinderEffect = useRef(!!paramBinder);
 
-  // Auto-update page number when binder number changes
+  // Override binder/page from URL params (takes priority over localStorage)
+  useEffect(() => {
+    if (paramBinder) setBinderNumber(parseInt(paramBinder) || 1);
+    if (paramPage) setPageNumber(parseInt(paramPage) || 1);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-update page number when binder number changes (only in new mode)
   useEffect(() => {
     // Skip the initial mount so we don't override the default page 1
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
+    // Skip when URL params set the binder initially
+    if (skipNextBinderEffect.current) {
+      skipNextBinderEffect.current = false;
+      return;
+    }
+    // Don't auto-advance page in update-images mode
+    if (mode === 'update-images') return;
 
     const timer = setTimeout(async () => {
       try {
@@ -183,6 +204,38 @@ export default function BulkEntry() {
     return () => clearTimeout(timer);
   }, [binderNumber]);
 
+  // Load existing cards when in update-images mode and binder/page changes
+  useEffect(() => {
+    if (mode !== 'update-images') return;
+    const load = async () => {
+      setLoadingExisting(true);
+      try {
+        const cards = await pageApi.getPageCards(binderNumber, pageNumber);
+        setExistingCards(cards);
+        // Also load right page for 6x3
+        if (layout === '6x3') {
+          const rightCards = await pageApi.getPageCards(binderNumber, pageNumber + 1);
+          setExistingCards(prev => [...cards, ...rightCards]);
+        }
+      } catch {
+        setExistingCards([]);
+      } finally {
+        setLoadingExisting(false);
+      }
+    };
+    const timer = setTimeout(load, 300);
+    return () => clearTimeout(timer);
+  }, [mode, binderNumber, pageNumber, layout]);
+
+  // Helper to find existing card at a grid position
+  const getExistingCardAt = (gridRow: number, gridCol: number): Card | undefined => {
+    const isRightPage = layout === '6x3' && gridCol >= 3;
+    const cardPageNumber = isRightPage ? pageNumber + 1 : pageNumber;
+    const cardColumn = isRightPage ? gridCol - 2 : gridCol + 1;
+    const cardRow = gridRow + 1;
+    return existingCards.find(c => c.pageNumber === cardPageNumber && c.row === cardRow && c.column === cardColumn);
+  };
+
   const handleLayoutChange = (newLayout: PageLayout) => {
     const newCols = newLayout === '6x3' ? 6 : 3;
     setLayout(newLayout);
@@ -209,7 +262,7 @@ export default function BulkEntry() {
     setLightboxRotation(0);
     setRotationDegrees(0);
     setLightboxCropMode(false);
-    setLightboxCropRect(null);
+    lbCrop.reset();
   };
 
   const closeLightbox = () => {
@@ -217,58 +270,14 @@ export default function BulkEntry() {
     setLightboxRotation(0);
     setRotationDegrees(0);
     setLightboxCropMode(false);
-    setLightboxCropRect(null);
-    lightboxImgRef.current = null;
+    lbCrop.reset();
   };
-
-  const drawLightboxCanvas = useCallback((rect: typeof lightboxCropRect) => {
-    const canvas = lightboxCanvasRef.current;
-    const img = lightboxImgRef.current;
-    if (!canvas || !img) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    if (rect) {
-      const x = Math.min(rect.startX, rect.endX);
-      const y = Math.min(rect.startY, rect.endY);
-      const w = Math.abs(rect.endX - rect.startX);
-      const h = Math.abs(rect.endY - rect.startY);
-
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(0, 0, canvas.width, y);
-      ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
-      ctx.fillRect(0, y, x, h);
-      ctx.fillRect(x + w, y, canvas.width - x - w, h);
-
-      ctx.strokeStyle = '#60a5fa';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
-    }
-  }, []);
 
   // Initialize crop canvas when entering crop mode
   useEffect(() => {
     if (!lightboxCropMode || !lightbox) return;
-    const canvas = lightboxCanvasRef.current;
-    if (!canvas) return;
-
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      lightboxImgRef.current = img;
-      const maxW = window.innerWidth * 0.85;
-      const maxH = window.innerHeight * 0.7;
-      const s = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
-      lightboxScaleRef.current = s;
-      canvas.width = img.naturalWidth * s;
-      canvas.height = img.naturalHeight * s;
-      drawLightboxCanvas(null);
-    };
-    img.src = lightbox.src;
-  }, [lightboxCropMode, lightbox, drawLightboxCanvas]);
+    lbCrop.initCanvas(lightbox.src);
+  }, [lightboxCropMode, lightbox, lbCrop.initCanvas]);
 
   const applyLightboxRotation = () => {
     if (!lightbox || lightboxRotation === 0) return;
@@ -308,7 +317,7 @@ export default function BulkEntry() {
 
         const newImg = new Image();
         newImg.crossOrigin = 'anonymous';
-        newImg.onload = () => { lightboxImgRef.current = newImg; };
+        newImg.onload = () => { lbCrop.imgRef.current = newImg; };
         newImg.src = previewUrl;
         setLightbox({ ...lightbox, src: previewUrl });
         setLightboxRotation(0);
@@ -317,13 +326,13 @@ export default function BulkEntry() {
       }, 'image/jpeg', 0.95);
     };
 
-    if (lightboxImgRef.current && lightboxImgRef.current.complete) {
-      loadAndRotate(lightboxImgRef.current);
+    if (lbCrop.imgRef.current && lbCrop.imgRef.current.complete) {
+      loadAndRotate(lbCrop.imgRef.current);
     } else {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        lightboxImgRef.current = img;
+        lbCrop.imgRef.current = img;
         loadAndRotate(img);
       };
       img.src = lightbox.src;
@@ -331,17 +340,17 @@ export default function BulkEntry() {
   };
 
   const handleLightboxCropConfirm = () => {
-    if (!lightboxCropRect || !lightbox) return;
-    const img = lightboxImgRef.current;
+    if (!lbCrop.cropRect || !lightbox) return;
+    const img = lbCrop.imgRef.current;
     if (!img || !img.complete) {
       toast.error('Image not loaded yet');
       return;
     }
-    const s = lightboxScaleRef.current;
-    const x = Math.min(lightboxCropRect.startX, lightboxCropRect.endX) / s;
-    const y = Math.min(lightboxCropRect.startY, lightboxCropRect.endY) / s;
-    const w = Math.abs(lightboxCropRect.endX - lightboxCropRect.startX) / s;
-    const h = Math.abs(lightboxCropRect.endY - lightboxCropRect.startY) / s;
+    const s = lbCrop.scaleRef.current;
+    const x = Math.min(lbCrop.cropRect.startX, lbCrop.cropRect.endX) / s;
+    const y = Math.min(lbCrop.cropRect.startY, lbCrop.cropRect.endY) / s;
+    const w = Math.abs(lbCrop.cropRect.endX - lbCrop.cropRect.startX) / s;
+    const h = Math.abs(lbCrop.cropRect.endY - lbCrop.cropRect.startY) / s;
 
     if (w < 10 || h < 10) return;
 
@@ -375,11 +384,11 @@ export default function BulkEntry() {
 
         const newImg = new Image();
         newImg.crossOrigin = 'anonymous';
-        newImg.onload = () => { lightboxImgRef.current = newImg; };
+        newImg.onload = () => { lbCrop.imgRef.current = newImg; };
         newImg.src = previewUrl;
         setLightbox({ ...lightbox, src: previewUrl });
         setLightboxCropMode(false);
-        setLightboxCropRect(null);
+        lbCrop.reset();
         toast.success('Image cropped');
       }, 'image/jpeg', 0.95);
     } catch {
@@ -756,13 +765,115 @@ export default function BulkEntry() {
     }
   };
 
+  const handleUpdateImages = async () => {
+    if (existingCards.length === 0) {
+      toast.error('No existing cards found on this page');
+      return;
+    }
+
+    const hasAnyImage = croppedImages.some(row => row.some(c => c !== null))
+      || croppedBackImages.some(row => row.some(c => c !== null))
+      || extractedImages.some(row => row.some(c => c !== null));
+    if (!hasAnyImage) {
+      toast.error('Upload a page photo first to extract images');
+      return;
+    }
+
+    setSaving(true);
+    let updatedCount = 0;
+    try {
+      // Upload page source image
+      if (pageImage) {
+        await pageApi.uploadPageImage(binderNumber, pageNumber, pageImage);
+        if (layout === '6x3') {
+          await pageApi.uploadPageImage(binderNumber, pageNumber + 1, pageImage);
+        }
+      }
+
+      // Upload manually cropped images
+      const fullyAssignedIds = new Set<number>();
+      for (let ri = 0; ri < 3; ri++) {
+        for (let ci = 0; ci < numCols; ci++) {
+          const card = getExistingCardAt(ri, ci);
+          if (!card) continue;
+          const cropped = croppedImages[ri]?.[ci];
+          const croppedBack = croppedBackImages[ri]?.[ci];
+          if (cropped) {
+            try {
+              await cardApi.uploadImage(card.id, cropped.file);
+              updatedCount++;
+            } catch { /* continue */ }
+          }
+          if (croppedBack) {
+            try {
+              await cardApi.uploadBackImage(card.id, croppedBack.file);
+              if (!cropped) updatedCount++;
+            } catch { /* continue */ }
+          }
+          if (cropped && croppedBack) fullyAssignedIds.add(card.id);
+        }
+      }
+
+      // Assign auto-extracted images for cards not fully manually cropped
+      const assignments: CardImageAssignment[] = [];
+      for (let ri = 0; ri < 3; ri++) {
+        for (let ci = 0; ci < numCols; ci++) {
+          const card = getExistingCardAt(ri, ci);
+          if (!card || fullyAssignedIds.has(card.id)) continue;
+          const extracted = extractedImages[ri]?.[ci];
+          const hasCropFront = !!croppedImages[ri]?.[ci];
+          const hasCropBack = !!croppedBackImages[ri]?.[ci];
+          const frontPath = !hasCropFront && extracted?.front ? extracted.front : undefined;
+          const backPath = !hasCropBack && extracted?.back ? extracted.back : undefined;
+          if (frontPath || backPath) {
+            assignments.push({ cardId: card.id, frontImagePath: frontPath, backImagePath: backPath });
+            updatedCount++;
+          }
+        }
+      }
+
+      if (assignments.length > 0) {
+        await pageApi.assignExtractedImages(assignments);
+      }
+
+      toast.success(`Images updated for ${updatedCount} card${updatedCount !== 1 ? 's' : ''}`);
+      navigate(`/binders/${binderNumber}?page=${pageNumber}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update images';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="page bulk-entry-page">
-      <h1 className="page-title">Bulk Entry</h1>
+      <div className="bulk-mode-toggle">
+        <button
+          type="button"
+          className={`mode-btn ${mode === 'new' ? 'active' : ''}`}
+          onClick={() => setMode('new')}
+        >
+          <Upload size={16} />
+          New Cards
+        </button>
+        <button
+          type="button"
+          className={`mode-btn ${mode === 'update-images' ? 'active' : ''}`}
+          onClick={() => setMode('update-images')}
+        >
+          <ImagePlus size={16} />
+          Update Images
+        </button>
+      </div>
+
+      <h1 className="page-title">{mode === 'update-images' ? 'Update Page Images' : 'Bulk Entry'}</h1>
       <p className="page-subtitle">
-        {layout === '6x3'
-          ? `Enter up to 18 cards from two consecutive binder pages (${pageNumber} & ${pageNumber + 1}).`
-          : 'Enter up to 9 cards from a single binder page at once.'}
+        {mode === 'update-images'
+          ? `Upload new front and/or back photos for existing cards on binder ${binderNumber}, page ${pageNumber}${layout === '6x3' ? ` & ${pageNumber + 1}` : ''}.`
+          : layout === '6x3'
+            ? `Enter up to 18 cards from two consecutive binder pages (${pageNumber} & ${pageNumber + 1}).`
+            : 'Enter up to 9 cards from a single binder page at once.'}
       </p>
 
       <div className="bulk-header">
@@ -816,41 +927,56 @@ export default function BulkEntry() {
             </div>
           </div>
 
-          <h3 className="form-section-title">Defaults (applied to empty fields)</h3>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Default Set Name</label>
-              <input
-                type="text"
-                value={defaultSetName}
-                onChange={e => setDefaultSetName(e.target.value)}
-                placeholder="e.g. Topps"
-              />
+          {mode === 'new' && (
+            <>
+              <h3 className="form-section-title">Defaults (applied to empty fields)</h3>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Default Set Name</label>
+                  <input
+                    type="text"
+                    value={defaultSetName}
+                    onChange={e => setDefaultSetName(e.target.value)}
+                    placeholder="e.g. Topps"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Default Year</label>
+                  <input
+                    type="text"
+                    value={defaultYear}
+                    onChange={e => setDefaultYear(e.target.value)}
+                    placeholder="e.g. 1987"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Default Manufacturer</label>
+                  <input
+                    type="text"
+                    value={defaultManufacturer}
+                    onChange={e => setDefaultManufacturer(e.target.value)}
+                    placeholder="e.g. Topps"
+                  />
+                </div>
+                <div className="form-group form-group-btn">
+                  <button type="button" className="btn btn-secondary" onClick={applyDefaults}>
+                    Apply Defaults
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+          {mode === 'update-images' && (
+            <div className="update-images-status">
+              {loadingExisting ? (
+                <span className="loading-hint"><RefreshCw size={14} className="spin" /> Loading existing cards...</span>
+              ) : existingCards.length > 0 ? (
+                <span className="existing-count">{existingCards.length} card{existingCards.length !== 1 ? 's' : ''} found on this page</span>
+              ) : (
+                <span className="no-cards-hint">No existing cards on this page — use New Cards mode instead</span>
+              )}
             </div>
-            <div className="form-group">
-              <label>Default Year</label>
-              <input
-                type="text"
-                value={defaultYear}
-                onChange={e => setDefaultYear(e.target.value)}
-                placeholder="e.g. 1987"
-              />
-            </div>
-            <div className="form-group">
-              <label>Default Manufacturer</label>
-              <input
-                type="text"
-                value={defaultManufacturer}
-                onChange={e => setDefaultManufacturer(e.target.value)}
-                placeholder="e.g. Topps"
-              />
-            </div>
-            <div className="form-group form-group-btn">
-              <button type="button" className="btn btn-secondary" onClick={applyDefaults}>
-                Apply Defaults
-              </button>
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="bulk-header-image">
@@ -868,10 +994,11 @@ export default function BulkEntry() {
               type="file"
               accept="image/jpeg,image/png,image/webp,image/tiff"
               onChange={handlePageImageChange}
+              onClick={e => { (e.target as HTMLInputElement).value = ''; }}
               className="image-input"
             />
           </div>
-          {pageImage && (
+          {pageImage && mode === 'new' && (
             <>
               <button
                 type="button"
@@ -898,6 +1025,7 @@ export default function BulkEntry() {
               type="file"
               accept="image/jpeg,image/png,image/webp,image/tiff"
               onChange={handleBackImageChange}
+              onClick={e => { (e.target as HTMLInputElement).value = ''; }}
               className="image-input"
             />
           </div>
@@ -997,8 +1125,8 @@ export default function BulkEntry() {
         </div>
       )}
 
-      {/* Composite mosaic of all extracted images */}
-      {extractedImages.some(row => row.some(c => c !== null)) && (
+      {/* Composite mosaic of all current images */}
+      {(extractedImages.some(row => row.some(c => c !== null)) || (mode === 'update-images' && existingCards.some(c => c.imagePath || c.backImagePath))) && (
         <div className="mosaic-section">
           <div className="mosaic-header">
             <button
@@ -1006,7 +1134,7 @@ export default function BulkEntry() {
               className="btn btn-sm btn-secondary"
               onClick={() => setShowMosaic(!showMosaic)}
             >
-              <Eye size={16} /> {showMosaic ? 'Hide' : 'Show'} Extraction Overview
+              <Eye size={16} /> {showMosaic ? 'Hide' : 'Show'} Images Overview
             </button>
             {showMosaic && (
               <div className="mosaic-toggle">
@@ -1029,13 +1157,17 @@ export default function BulkEntry() {
           </div>
           {showMosaic && (
             <div className={`mosaic-grid mosaic-cols-${numCols}`}>
-              {extractedImages.flatMap((row, ri) =>
-                row.map((cell, ci) => {
+              {cells.flatMap((row, ri) =>
+                row.map((_, ci) => {
                   const cropped = mosaicSide === 'front' ? croppedImages[ri]?.[ci] : croppedBackImages[ri]?.[ci];
-                  const extractedPath = mosaicSide === 'front' ? cell?.front : cell?.back;
+                  const extracted = extractedImages[ri]?.[ci];
+                  const extractedPath = mosaicSide === 'front' ? extracted?.front : extracted?.back;
+                  const existingCard = mode === 'update-images' ? getExistingCardAt(ri, ci) : undefined;
+                  const existingPath = mosaicSide === 'front' ? existingCard?.imagePath : existingCard?.backImagePath;
                   const src = cropped
                     ? cropped.previewUrl
-                    : extractedPath ? `${API_BASE}${extractedPath}` : null;
+                    : extractedPath ? `${API_BASE}${extractedPath}`
+                    : existingPath ? `${API_BASE}${existingPath}` : null;
                   return (
                     <div key={`${ri}-${ci}`} className={`mosaic-cell${!src ? ' mosaic-cell-empty' : ''}`}>
                       {src ? (
@@ -1060,7 +1192,7 @@ export default function BulkEntry() {
               const displayPage = isRightPage ? pageNumber + 1 : pageNumber;
               const displayCol = isRightPage ? ci - 2 : ci + 1;
               return (
-              <div key={ci} className={`bulk-cell ${layout === '6x3' && ci === 3 ? 'bulk-cell-divider' : ''}`}>
+              <div key={ci} className={`bulk-cell ${layout === '6x3' && ci === 3 ? 'bulk-cell-divider' : ''}${mode === 'update-images' ? ' bulk-cell-update' : ''}`}>
                 <div className="bulk-cell-header">
                   <span>{layout === '6x3' ? `P${displayPage} R${ri + 1}-C${displayCol}` : `R${ri + 1} - C${ci + 1}`}</span>
                   {pageImagePreview && (
@@ -1089,20 +1221,43 @@ export default function BulkEntry() {
                   const hasCropFront = !!croppedImages[ri]?.[ci];
                   const hasCropBack = !!croppedBackImages[ri]?.[ci];
                   const extracted = extractedImages[ri]?.[ci];
+                  const existingCard = mode === 'update-images' ? getExistingCardAt(ri, ci) : undefined;
                   const frontSrc = hasCropFront
                     ? croppedImages[ri][ci]!.previewUrl
                     : extracted?.front ? `${API_BASE}${extracted.front}` : null;
                   const backSrc = hasCropBack
                     ? croppedBackImages[ri][ci]!.previewUrl
                     : extracted?.back ? `${API_BASE}${extracted.back}` : null;
-                  if (!frontSrc && !backSrc) return null;
+                  // In update-images mode, show existing card images as fallback
+                  const displayFrontSrc = frontSrc || (existingCard?.imagePath ? `${API_BASE}${existingCard.imagePath}` : null);
+                  const displayBackSrc = backSrc || (existingCard?.backImagePath ? `${API_BASE}${existingCard.backImagePath}` : null);
+                  const showFront = mode === 'update-images' ? displayFrontSrc : frontSrc;
+                  const showBack = mode === 'update-images' ? displayBackSrc : backSrc;
+                  if (!showFront && !showBack) return null;
                   return (
                     <div className="bulk-cell-crop-preview">
-                      {frontSrc && <img src={frontSrc} alt="Front" onClick={() => openLightbox(frontSrc, ri, ci, 'front')} />}
-                      {backSrc && <img src={backSrc} alt="Back" onClick={() => openLightbox(backSrc, ri, ci, 'back')} />}
+                      {showFront && <img src={showFront} alt="Front" onClick={() => openLightbox(showFront, ri, ci, 'front')}
+                        className={frontSrc ? 'has-new-image' : ''} />}
+                      {showBack && <img src={showBack} alt="Back" onClick={() => openLightbox(showBack, ri, ci, 'back')}
+                        className={backSrc ? 'has-new-image' : ''} />}
                     </div>
                   );
                 })()}
+                {mode === 'update-images' ? (
+                  <div className="bulk-cell-existing">
+                    {(() => {
+                      const existingCard = getExistingCardAt(ri, ci);
+                      if (!existingCard) return <span className="empty-slot">Empty slot</span>;
+                      return (
+                        <>
+                          <span className="existing-player">{existingCard.playerName}</span>
+                          <span className="existing-detail">{existingCard.year} {existingCard.setName}{existingCard.cardNumber ? ` #${existingCard.cardNumber}` : ''}</span>
+                          {existingCard.team && <span className="existing-detail">{existingCard.team}</span>}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
                 <div className="bulk-cell-fields">
                   <input
                     type="text"
@@ -1168,6 +1323,7 @@ export default function BulkEntry() {
                     onChange={e => updateCell(ri, ci, 'notes', e.target.value)}
                   />
                 </div>
+                )}
               </div>
             );
             })}
@@ -1179,14 +1335,26 @@ export default function BulkEntry() {
         <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}>
           Cancel
         </button>
-        <button
-          type="button"
-          className="btn btn-primary btn-lg"
-          onClick={handleSaveAll}
-          disabled={saving}
-        >
-          {saving ? 'Saving...' : 'Save All Cards'}
-        </button>
+        {mode === 'update-images' ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            onClick={handleUpdateImages}
+            disabled={saving || existingCards.length === 0}
+          >
+            <ImagePlus size={18} />
+            {saving ? 'Updating...' : 'Update Images'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            onClick={handleSaveAll}
+            disabled={saving}
+          >
+            {saving ? 'Saving...' : 'Save All Cards'}
+          </button>
+        )}
       </div>
 
       {showConflictDialog && (
@@ -1271,10 +1439,10 @@ export default function BulkEntry() {
                 onClick={() => {
                   if (!lightboxCropMode) {
                     setLightboxCropMode(true);
-                    setLightboxCropRect(null);
+                    lbCrop.reset();
                   } else {
                     setLightboxCropMode(false);
-                    setLightboxCropRect(null);
+                    lbCrop.reset();
                   }
                 }}
                 title={lightboxRotation !== 0 ? 'Apply rotation first' : 'Crop'}
@@ -1282,9 +1450,7 @@ export default function BulkEntry() {
               >
                 <Crop size={16} /> {lightboxCropMode ? 'Cancel Crop' : 'Crop'}
               </button>
-              {lightboxCropMode && lightboxCropRect &&
-                Math.abs(lightboxCropRect.endX - lightboxCropRect.startX) > 10 &&
-                Math.abs(lightboxCropRect.endY - lightboxCropRect.startY) > 10 && (
+              {lightboxCropMode && lbCrop.hasSelection && (
                 <button className="btn btn-sm btn-primary" onClick={handleLightboxCropConfirm}>
                   Apply Crop
                 </button>
@@ -1294,25 +1460,9 @@ export default function BulkEntry() {
             {lightboxCropMode ? (
               <div className="lightbox-canvas-wrap">
                 <canvas
-                  ref={lightboxCanvasRef}
-                  onMouseDown={e => {
-                    const rect = lightboxCanvasRef.current!.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    setLightboxCropRect({ startX: x, startY: y, endX: x, endY: y });
-                    setLightboxDrawing(true);
-                  }}
-                  onMouseMove={e => {
-                    if (!lightboxDrawing || !lightboxCropRect) return;
-                    const rect = lightboxCanvasRef.current!.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    const updated = { ...lightboxCropRect, endX: x, endY: y };
-                    setLightboxCropRect(updated);
-                    drawLightboxCanvas(updated);
-                  }}
-                  onMouseUp={() => setLightboxDrawing(false)}
-                  onMouseLeave={() => setLightboxDrawing(false)}
+                  ref={lbCrop.canvasRef}
+                  onMouseDown={lbCrop.handleMouseDown}
+                  onMouseMove={lbCrop.handleCanvasHover}
                   className="crop-canvas"
                 />
               </div>

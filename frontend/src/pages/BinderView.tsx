@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronsRight, Plus, RotateCw, Minus, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsRight, Plus, RotateCw, Minus, Trash2, ImagePlus } from 'lucide-react';
 import { binderApi, pageApi, cardApi, API_BASE } from '../services/api';
 import type { BinderDetail, Card } from '../types';
 import { formatCurrency, formatValueRange } from '../types';
@@ -236,6 +236,12 @@ export default function BinderView() {
             {showAllBacks ? ' Show Fronts' : ' Show Backs'}
           </button>
         )}
+        <button
+          className="btn btn-sm"
+          onClick={() => navigate(`/bulk-entry?mode=update-images&binder=${binder.id}&page=${currentPage}`)}
+        >
+          <ImagePlus size={14} /> Update Images
+        </button>
         {pageCards.length > 0 && (
           <button className="btn btn-sm btn-danger" onClick={deletePageCards}>
             <Trash2 size={14} /> Clear Page
