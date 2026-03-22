@@ -11,11 +11,25 @@ import toast from 'react-hot-toast';
 export default function BinderView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialPage = parseInt(searchParams.get('page') || '1') || 1;
   const [binder, setBinder] = useState<BinderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(initialPage);
+
+  // Keep URL in sync with current page so browser back returns to the right page
+  useEffect(() => {
+    const urlPage = parseInt(searchParams.get('page') || '1') || 1;
+    if (currentPage !== urlPage) {
+      const newParams = new URLSearchParams(searchParams);
+      if (currentPage === 1) {
+        newParams.delete('page');
+      } else {
+        newParams.set('page', String(currentPage));
+      }
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [currentPage]);
   const [flippedCards, setFlippedCards] = useState<Set<number>>(new Set());
   const [showAllBacks, setShowAllBacks] = useState(false);
   const [editingPages, setEditingPages] = useState(false);
@@ -90,6 +104,16 @@ export default function BinderView() {
   }, [id]);
 
   const maxPage = binder?.totalPages || highestCardPage;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      if (e.key === 'ArrowLeft') setCurrentPage(p => Math.max(1, p - 1));
+      if (e.key === 'ArrowRight') setCurrentPage(p => Math.min(maxPage, p + 1));
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [maxPage]);
 
   const lastPopulatedPage = binder?.cards.length
     ? Math.max(...binder.cards.map(c => c.pageNumber))

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera, Crop } from 'lucide-react';
-import { cardApi, binderApi, aiApi, API_BASE } from '../services/api';
+import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera, Crop, Wand2, Undo2, AlignVerticalSpaceAround, Check, X } from 'lucide-react';
+import { cardApi, binderApi, aiApi, pageApi, API_BASE } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
 import LoadingSkeleton from '../components/LoadingSkeleton';
@@ -51,10 +51,14 @@ export default function CardDetail() {
 
   // Lightbox editor state
   const [lightbox, setLightbox] = useState<{ src: string; side: 'front' | 'back' } | null>(null);
+  const [originalLightboxSrc, setOriginalLightboxSrc] = useState<string | null>(null);
+  const [originalLightboxFile, setOriginalLightboxFile] = useState<{ file: File | null; preview: string | null } | null>(null);
   const [lightboxRotation, setLightboxRotation] = useState(0);
   const [rotationDegrees, setRotationDegrees] = useState(0);
   const [lightboxCropMode, setLightboxCropMode] = useState(false);
   const lbCrop = useLightboxCrop();
+  const cropConfirmRef = useRef<() => void>(() => {});
+  const rotateApplyRef = useRef<() => void>(() => {});
 
   // Conflict dialog state
   const [conflictCards, setConflictCards] = useState<Card[]>([]);
@@ -177,6 +181,11 @@ export default function CardDetail() {
   // Lightbox editor functions
   const openLightbox = (src: string, side: 'front' | 'back') => {
     setLightbox({ src, side });
+    setOriginalLightboxSrc(src);
+    setOriginalLightboxFile({
+      file: side === 'front' ? imageFile : backImageFile,
+      preview: side === 'front' ? imagePreview : backImagePreview,
+    });
     setLightboxRotation(0);
     setRotationDegrees(0);
     setLightboxCropMode(false);
@@ -185,10 +194,29 @@ export default function CardDetail() {
 
   const closeLightbox = () => {
     setLightbox(null);
+    setOriginalLightboxSrc(null);
+    setOriginalLightboxFile(null);
     setLightboxRotation(0);
     setRotationDegrees(0);
     setLightboxCropMode(false);
     lbCrop.reset();
+  };
+
+  const handleRevertLightbox = () => {
+    if (!lightbox || !originalLightboxSrc || !originalLightboxFile) return;
+    if (lightbox.side === 'front') {
+      setImageFile(originalLightboxFile.file);
+      setImagePreview(originalLightboxFile.preview);
+    } else {
+      setBackImageFile(originalLightboxFile.file);
+      setBackImagePreview(originalLightboxFile.preview);
+    }
+    setLightbox({ ...lightbox, src: originalLightboxSrc });
+    setLightboxRotation(0);
+    setRotationDegrees(0);
+    setLightboxCropMode(false);
+    lbCrop.reset();
+    toast.success('Reverted to original');
   };
 
   useEffect(() => {
@@ -196,10 +224,50 @@ export default function CardDetail() {
     lbCrop.initCanvas(lightbox.src);
   }, [lightboxCropMode, lightbox, lbCrop.initCanvas]);
 
-  const applyLightboxRotation = () => {
-    if (!lightbox || lightboxRotation === 0) return;
+  // Escape cancels, Enter applies pending rotation or crop
+  useEffect(() => {
+    if (!lightbox) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (lightboxRotation !== 0) {
+          e.preventDefault();
+          setLightboxRotation(0);
+          setRotationDegrees(0);
+          return;
+        }
+        if (lightboxCropMode) {
+          e.preventDefault();
+          setLightboxCropMode(false);
+          lbCrop.reset();
+          return;
+        }
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (lightboxRotation !== 0) {
+          rotateApplyRef.current();
+          return;
+        }
+        if (lightboxCropMode) {
+          if (lbCrop.hasSelection) {
+            cropConfirmRef.current();
+          } else {
+            setLightboxCropMode(false);
+            lbCrop.reset();
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [lightbox, lightboxRotation, lightboxCropMode, lbCrop.hasSelection]);
+
+  const applyLightboxRotation = (angle?: number) => {
+    const deg = angle ?? lightboxRotation;
+    if (!lightbox || deg === 0) return;
     const doRotate = (img: HTMLImageElement) => {
-      const rad = (lightboxRotation * Math.PI) / 180;
+      const rad = (deg * Math.PI) / 180;
       const absCos = Math.abs(Math.cos(rad));
       const absSin = Math.abs(Math.sin(rad));
       const newW = Math.round(img.naturalWidth * absCos + img.naturalHeight * absSin);
@@ -232,18 +300,16 @@ export default function CardDetail() {
         setLightbox({ ...lightbox, src: previewUrl });
         setLightboxRotation(0);
         setRotationDegrees(0);
-        toast.success(`Rotation applied (${lightboxRotation}°)`);
+        toast.success(`Rotation applied (${deg}°)`);
       }, 'image/jpeg', 0.95);
     };
-    if (lbCrop.imgRef.current && lbCrop.imgRef.current.complete) {
-      doRotate(lbCrop.imgRef.current);
-    } else {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => { lbCrop.imgRef.current = img; doRotate(img); };
-      img.src = lightbox.src;
-    }
+    // Always load from the current lightbox.src to avoid stale imgRef
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { lbCrop.imgRef.current = img; doRotate(img); };
+    img.src = lightbox.src;
   };
+  rotateApplyRef.current = () => applyLightboxRotation();
 
   const handleLightboxCropConfirm = () => {
     if (!lbCrop.cropRect || !lightbox) return;
@@ -283,6 +349,75 @@ export default function CardDetail() {
         toast.success('Image cropped');
       }, 'image/jpeg', 0.95);
     } catch { toast.error('Crop failed'); }
+  };
+  cropConfirmRef.current = handleLightboxCropConfirm;
+
+  const [autoCropping, setAutoCropping] = useState(false);
+  const handleAutoCrop = async () => {
+    if (!lightbox) return;
+    setAutoCropping(true);
+    try {
+      const resp = await fetch(lightbox.src);
+      const srcBlob = await resp.blob();
+      const srcFile = new File([srcBlob], 'crop.jpg', { type: srcBlob.type || 'image/jpeg' });
+      const croppedBlob = await pageApi.autoCrop(srcFile);
+      const previewUrl = URL.createObjectURL(croppedBlob);
+      const file = new File([croppedBlob], `autocrop_${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+      if (lightbox.side === 'front') {
+        setImageFile(file);
+        setImagePreview(previewUrl);
+      } else {
+        setBackImageFile(file);
+        setBackImagePreview(previewUrl);
+      }
+
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+      newImg.onload = () => { lbCrop.imgRef.current = newImg; };
+      newImg.src = previewUrl;
+      setLightbox({ ...lightbox, src: previewUrl });
+      setLightboxCropMode(false);
+      lbCrop.reset();
+      toast.success('Auto crop applied');
+    } catch {
+      toast.error('Auto crop failed');
+    } finally {
+      setAutoCropping(false);
+    }
+  };
+
+  const [autoRotating, setAutoRotating] = useState(false);
+  const handleAutoRotate = async () => {
+    if (!lightbox) return;
+    setAutoRotating(true);
+    try {
+      const resp = await fetch(lightbox.src);
+      const srcBlob = await resp.blob();
+      const srcFile = new File([srcBlob], 'rotate.jpg', { type: srcBlob.type || 'image/jpeg' });
+      const rotatedBlob = await pageApi.autoRotate(srcFile);
+      const previewUrl = URL.createObjectURL(rotatedBlob);
+      const file = new File([rotatedBlob], `autorotate_${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+      if (lightbox.side === 'front') {
+        setImageFile(file);
+        setImagePreview(previewUrl);
+      } else {
+        setBackImageFile(file);
+        setBackImagePreview(previewUrl);
+      }
+
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+      newImg.onload = () => { lbCrop.imgRef.current = newImg; };
+      newImg.src = previewUrl;
+      setLightbox({ ...lightbox, src: previewUrl });
+      toast.success('Auto rotate applied');
+    } catch {
+      toast.error('Auto rotate failed');
+    } finally {
+      setAutoRotating(false);
+    }
   };
 
   const handleIdentifyWithAi = async () => {
@@ -396,7 +531,7 @@ export default function CardDetail() {
         await cardApi.uploadBackImage(savedCard.id, backImageFile);
       }
 
-      navigate(`/cards/${savedCard.id}`);
+      navigate(`/cards/${savedCard.id}`, { replace: !isNew });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save card';
       toast.error(msg);
@@ -772,56 +907,128 @@ export default function CardDetail() {
             <div className="lightbox-toolbar">
               <span className="lightbox-label">
                 {lightbox.side === 'front' ? 'Front' : 'Back'} Image
-                {lightboxRotation !== 0 && <span className="rotation-preview-badge">{lightboxRotation}°</span>}
               </span>
               <div className="lightbox-rotate-controls">
-                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 90)} title="Rotate 90° left" disabled={lightboxCropMode}>
-                  ↺ 90°
-                </button>
-                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 90)} title="Rotate 90° right" disabled={lightboxCropMode}>
-                  ↻ 90°
-                </button>
-                <input
-                  type="number"
-                  className="rotate-degrees-input"
-                  value={rotationDegrees}
-                  onChange={e => setRotationDegrees(Number(e.target.value))}
-                  min={-360}
-                  max={360}
-                  step={1}
-                  title="Custom rotation degrees"
-                  disabled={lightboxCropMode}
-                />
-                <button
-                  type="button"
-                  className="btn btn-sm btn-secondary"
-                  onClick={() => { setLightboxRotation(prev => prev + rotationDegrees); setRotationDegrees(0); }}
-                  disabled={rotationDegrees === 0 || lightboxCropMode}
-                  title="Add custom rotation"
-                >
-                  <RotateCw size={14} /> Rotate
-                </button>
+                <div className="rotate-dropdown">
+                  <button type="button" className="btn btn-sm btn-secondary" disabled={lightboxCropMode || lightboxRotation !== 0}>
+                    90° ▾
+                  </button>
+                  <div className="rotate-dropdown-menu">
+                    <button type="button" onClick={() => applyLightboxRotation(-90)} disabled={lightboxCropMode || lightboxRotation !== 0}>
+                      ↺ 90° left
+                    </button>
+                    <button type="button" onClick={() => applyLightboxRotation(90)} disabled={lightboxCropMode || lightboxRotation !== 0}>
+                      ↻ 90° right
+                    </button>
+                  </div>
+                </div>
+                <div className="rotate-dropdown">
+                  <button type="button" className="btn btn-sm btn-secondary" disabled={lightboxCropMode || lightboxRotation !== 0}>
+                    Custom ▾
+                  </button>
+                  <div className="rotate-dropdown-menu rotate-custom-menu">
+                    <div className="rotate-custom-row" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="number"
+                        className="rotate-degrees-input"
+                        value={rotationDegrees}
+                        onChange={e => setRotationDegrees(Number(e.target.value))}
+                        min={-360}
+                        max={360}
+                        step={1}
+                        title="Custom rotation degrees"
+                        disabled={lightboxCropMode}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => { setLightboxRotation(prev => prev + rotationDegrees); setRotationDegrees(0); }}
+                        disabled={rotationDegrees === 0 || lightboxCropMode}
+                        title="Add custom rotation"
+                      >
+                        <RotateCw size={14} /> Rotate
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="rotate-btn-group">
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.5)} title="Rotate 0.5° left" disabled={lightboxCropMode}>
+                    -.5
+                  </button>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.2)} title="Rotate 0.2° left" disabled={lightboxCropMode}>
+                    -.2
+                  </button>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.2)} title="Rotate 0.2° right" disabled={lightboxCropMode}>
+                    +.2
+                  </button>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.5)} title="Rotate 0.5° right" disabled={lightboxCropMode}>
+                    +.5
+                  </button>
+                </div>
+                {lightboxRotation !== 0 && (
+                  <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={() => applyLightboxRotation()} title="Apply rotation">
+                    <Check size={16} />
+                  </button>
+                )}
+                {lightboxRotation !== 0 && (
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setLightboxRotation(0); setRotationDegrees(0); }} title="Cancel rotation (Esc)">
+                    <X size={14} />
+                  </button>
+                )}
               </div>
-              {lightboxRotation !== 0 && (
-                <button type="button" className="btn btn-sm btn-primary" onClick={applyLightboxRotation} title="Commit rotation">
-                  Apply Rotation
+              <button
+                type="button"
+                className={`btn btn-sm ${lightboxCropMode ? 'btn-accent' : 'btn-secondary'}`}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  if (lightboxCropMode) { setLightboxCropMode(false); lbCrop.reset(); return; }
+                  setLightboxCropMode(true);
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                title={lightboxRotation !== 0 ? 'Apply rotation first' : 'Crop'}
+                disabled={lightboxRotation !== 0}
+              >
+                <Crop size={16} /> Crop
+              </button>
+              {lightboxCropMode && (
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setLightboxCropMode(false); lbCrop.reset(); }} title="Cancel crop">
+                  <X size={14} />
+                </button>
+              )}
+              {lightboxCropMode && lbCrop.hasSelection && (
+                <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={handleLightboxCropConfirm} title="Apply crop">
+                  <Check size={16} />
                 </button>
               )}
               <button
                 type="button"
-                className={`btn btn-sm ${lightboxCropMode ? 'btn-accent' : 'btn-secondary'}`}
-                onClick={() => {
-                  setLightboxCropMode(prev => !prev);
-                  lbCrop.reset();
-                }}
-                title={lightboxRotation !== 0 ? 'Apply rotation first' : 'Crop'}
-                disabled={lightboxRotation !== 0}
+                className="btn btn-sm btn-secondary"
+                onClick={handleAutoCrop}
+                disabled={autoCropping || lightboxCropMode || lightboxRotation !== 0}
+                title="Auto-detect card edges and crop"
               >
-                <Crop size={16} /> {lightboxCropMode ? 'Cancel Crop' : 'Crop'}
+                <Wand2 size={16} /> {autoCropping ? 'Cropping...' : 'Auto Crop'}
               </button>
-              {lightboxCropMode && lbCrop.hasSelection && (
-                <button type="button" className="btn btn-sm btn-primary" onClick={handleLightboxCropConfirm}>
-                  Apply Crop
+              {/* Auto Rotate hidden — detection needs improvement
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={handleAutoRotate}
+                disabled={autoRotating || lightboxCropMode || lightboxRotation !== 0}
+                title="Auto-detect skew and straighten"
+              >
+                <AlignVerticalSpaceAround size={16} /> {autoRotating ? 'Rotating...' : 'Auto Rotate'}
+              </button>
+              */}
+              {lightbox && originalLightboxSrc && lightbox.src !== originalLightboxSrc && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={handleRevertLightbox}
+                  disabled={lightboxCropMode}
+                  title="Revert to original image"
+                >
+                  <Undo2 size={16} /> Revert
                 </button>
               )}
               <button type="button" className="btn btn-sm btn-ghost" onClick={closeLightbox} style={{ marginLeft: 'auto' }}>✕</button>
@@ -836,12 +1043,15 @@ export default function CardDetail() {
                 />
               </div>
             ) : (
-              <img
-                src={lightbox.src}
-                alt="Full size preview"
-                className="lightbox-image"
-                style={lightboxRotation !== 0 ? { transform: `rotate(${lightboxRotation}deg)` } : undefined}
-              />
+              <div className="lightbox-image-container">
+                <img
+                  src={lightbox.src}
+                  alt="Full size preview"
+                  className="lightbox-image"
+                  style={lightboxRotation !== 0 ? { transform: `rotate(${lightboxRotation}deg)` } : undefined}
+                />
+                {lightboxRotation !== 0 && <div className="rotation-grid-overlay" />}
+              </div>
             )}
           </div>
         </div>

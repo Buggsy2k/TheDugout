@@ -119,7 +119,16 @@ export function useLightboxCrop() {
       scaleRef.current = s;
       canvas.width = img.naturalWidth * s;
       canvas.height = img.naturalHeight * s;
-      drawCanvas(null);
+      // Start with a crop box 20px inside the image edges
+      const pad = 20;
+      const initialRect: CropRect = {
+        startX: pad,
+        startY: pad,
+        endX: canvas.width - pad,
+        endY: canvas.height - pad,
+      };
+      setCropRect(initialRect);
+      drawCanvas(initialRect);
     };
     img.src = src;
   }, [drawCanvas]);

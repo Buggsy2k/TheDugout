@@ -1803,10 +1803,104 @@ a:hover {
   transition: transform 0.2s ease;
 }
 
+.lightbox-image-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rotation-grid-overlay {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  right: 20px;
+  bottom: 20px;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background-size: 16.66% 33.33%;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
+  z-index: 1;
+}
+
 .lightbox-rotate-controls {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.rotate-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rotate-group-label {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  padding: 0 2px;
+  user-select: none;
+}
+
+.rotate-dropdown {
+  position: relative;
+}
+
+.rotate-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+  min-width: 120px;
+}
+
+.rotate-dropdown:hover .rotate-dropdown-menu {
+  display: block;
+}
+
+.rotate-dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rotate-dropdown-menu button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.rotate-dropdown-menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rotate-custom-menu {
+  padding: 8px;
+  min-width: 160px;
+}
+
+.rotate-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-icon-only {
+  padding: 4px 6px !important;
+  min-width: unset;
 }
 
 .rotate-degrees-input {

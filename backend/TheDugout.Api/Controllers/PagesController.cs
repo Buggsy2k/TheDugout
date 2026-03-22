@@ -64,6 +64,36 @@ public class PagesController : ControllerBase
         return File(pngBytes, "image/png");
     }
 
+    [HttpPost("auto-crop")]
+    public async Task<IActionResult> AutoCrop(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file uploaded");
+
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        var croppedBytes = _extractionService.AutoCrop(ms.ToArray());
+        return File(croppedBytes, "image/jpeg");
+    }
+
+    [HttpPost("auto-rotate")]
+    public async Task<IActionResult> AutoRotate(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file uploaded");
+
+        if (file.Length > 50 * 1024 * 1024)
+            return BadRequest("File size exceeds 50MB limit");
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        var rotatedBytes = _extractionService.AutoRotate(ms.ToArray());
+        return File(rotatedBytes, "image/jpeg");
+    }
+
     [HttpPost("extract-cards")]
     public async Task<IActionResult> ExtractCardImages(
         IFormFile file,

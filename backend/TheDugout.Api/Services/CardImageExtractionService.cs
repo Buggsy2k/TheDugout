@@ -89,6 +89,194 @@ public class CardImageExtractionService
     }
 
     /// <summary>
+    /// Auto-crops a single card image by detecting card edges and trimming.
+    /// Returns the cropped image as JPEG bytes.
+    /// </summary>
+    public byte[] AutoCrop(byte[] imageBytes)
+    {
+        var p = new ExtractionParams();
+        using var image = Mat.FromImageData(imageBytes, ImreadModes.Color);
+        using var cropped = ExtractCardFromCell(image, p);
+
+        var encodeParams = new[] { new ImageEncodingParam(ImwriteFlags.JpegQuality, OutputQuality) };
+        Cv2.ImEncode(".jpg", cropped, out var buf, encodeParams);
+        return buf;
+    }
+
+    /// <summary>
+    /// Auto-rotates an image to straighten it by detecting dominant edge lines.
+    /// Uses Hough line detection to find the median skew angle, then rotates to correct.
+    /// Returns the straightened image as JPEG bytes.
+    /// </summary>
+    public byte[] AutoRotate(byte[] imageBytes)
+    {
+        using var image = Mat.FromImageData(imageBytes, ImreadModes.Color);
+        var angle = DetectSkewAngle(image);
+
+        if (Math.Abs(angle) < 0.1)
+        {
+            _logger.LogInformation("Auto-rotate: image already straight (angle={Angle:F2}°)", angle);
+            var encParams = new[] { new ImageEncodingParam(ImwriteFlags.JpegQuality, OutputQuality) };
+            Cv2.ImEncode(".jpg", image, out var unchanged, encParams);
+            return unchanged;
+        }
+
+        _logger.LogInformation("Auto-rotate: correcting {Angle:F2}° skew", angle);
+
+        // Rotate with white fill
+        var center = new Point2f(image.Width / 2f, image.Height / 2f);
+        using var rotMat = Cv2.GetRotationMatrix2D(center, angle, 1.0);
+
+        // Calculate new bounding size
+        var rad = Math.Abs(angle * Math.PI / 180);
+        var cos = Math.Abs(Math.Cos(rad));
+        var sin = Math.Abs(Math.Sin(rad));
+        var newW = (int)(image.Width * cos + image.Height * sin);
+        var newH = (int)(image.Width * sin + image.Height * cos);
+
+        // Adjust the rotation matrix for the new center
+        rotMat.Set(0, 2, rotMat.At<double>(0, 2) + (newW - image.Width) / 2.0);
+        rotMat.Set(1, 2, rotMat.At<double>(1, 2) + (newH - image.Height) / 2.0);
+
+        using var rotated = new Mat();
+        Cv2.WarpAffine(image, rotated, rotMat, new Size(newW, newH),
+            InterpolationFlags.Linear, BorderTypes.Constant, Scalar.White);
+
+        var encodeParams = new[] { new ImageEncodingParam(ImwriteFlags.JpegQuality, OutputQuality) };
+        Cv2.ImEncode(".jpg", rotated, out var buf, encodeParams);
+        return buf;
+    }
+
+    /// <summary>
+    /// Detects the skew angle of an image using Hough line detection.
+    /// Returns the angle in degrees to rotate for correction (negative = clockwise needed).
+    /// Considers line angles near 0° (horizontal) and 90° (vertical).
+    /// </summary>
+    private double DetectSkewAngle(Mat image)
+    {
+        using var gray = new Mat();
+        Cv2.CvtColor(image, gray, ColorConversionCodes.BGR2GRAY);
+        using var blurred = new Mat();
+        Cv2.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+        using var edges = new Mat();
+        Cv2.Canny(blurred, edges, 50, 150);
+
+        // Use probabilistic Hough to get line segments
+        var lines = Cv2.HoughLinesP(edges, 1, Math.PI / 180, 100,
+            minLineLength: Math.Min(image.Width, image.Height) * 0.15,
+            maxLineGap: 10);
+
+        if (lines.Length == 0)
+        {
+            _logger.LogDebug("Auto-rotate: no lines detected");
+            return 0;
+        }
+
+        var angles = new List<double>();
+        foreach (var line in lines)
+        {
+            var dx = line.P2.X - line.P1.X;
+            var dy = line.P2.Y - line.P1.Y;
+            var angleDeg = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+
+            // Normalize to deviation from nearest axis (0° or ±90°)
+            // We want the small correction angle, not the full angle
+            if (angleDeg > 45) angleDeg -= 90;
+            else if (angleDeg < -45) angleDeg += 90;
+
+            // Only consider small deviations (< 15°) — large means non-card lines
+            if (Math.Abs(angleDeg) < 15)
+                angles.Add(angleDeg);
+        }
+
+        if (angles.Count == 0)
+        {
+            _logger.LogDebug("Auto-rotate: no near-axis lines found");
+            return 0;
+        }
+
+        // Use median to be robust against outlier lines
+        angles.Sort();
+        var median = angles[angles.Count / 2];
+
+        _logger.LogDebug("Auto-rotate: detected {Count} lines, median angle={Angle:F2}°", angles.Count, median);
+        return median;
+    }
+
+    /// <summary>
+    /// Detects the proportion of green pixels in an image.
+    /// Used to decide whether green-background detection should be attempted.
+    /// </summary>
+    private double GetGreenRatio(Mat cell)
+    {
+        using var hsv = new Mat();
+        Cv2.CvtColor(cell, hsv, ColorConversionCodes.BGR2HSV);
+        // Broad green range in HSV: H 25-95, S 30+, V 30+
+        using var mask = new Mat();
+        Cv2.InRange(hsv, new Scalar(25, 30, 30), new Scalar(95, 255, 255), mask);
+        var greenPixels = Cv2.CountNonZero(mask);
+        return (double)greenPixels / (mask.Rows * mask.Cols);
+    }
+
+    /// <summary>
+    /// Finds card bounds by masking out the green background using HSV color space.
+    /// The card is the largest non-green connected region that's card-shaped.
+    /// Returns null if insufficient green is detected (not a green background image).
+    /// </summary>
+    private Rect? FindBoundsFromGreenMask(Mat cell, ExtractionParams p)
+    {
+        const double MinGreenRatio = 0.05; // at least 5% green pixels to attempt
+
+        var greenRatio = GetGreenRatio(cell);
+        if (greenRatio < MinGreenRatio)
+        {
+            _logger.LogDebug("Green ratio {Ratio:F3} too low for green-mask detection", greenRatio);
+            return null;
+        }
+
+        _logger.LogDebug("Green ratio {Ratio:F3} — attempting green-mask card detection", greenRatio);
+
+        using var hsv = new Mat();
+        Cv2.CvtColor(cell, hsv, ColorConversionCodes.BGR2HSV);
+
+        // Create green mask with broad HSV range
+        using var greenMask = new Mat();
+        Cv2.InRange(hsv, new Scalar(25, 30, 30), new Scalar(95, 255, 255), greenMask);
+
+        // Invert to get the card (non-green) region
+        using var cardMask = new Mat();
+        Cv2.BitwiseNot(greenMask, cardMask);
+
+        // Clean up noise: close small gaps, then open to remove small speckles
+        using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(5, 5));
+        using var closed = new Mat();
+        Cv2.MorphologyEx(cardMask, closed, MorphTypes.Close, kernel, iterations: 3);
+        using var opened = new Mat();
+        Cv2.MorphologyEx(closed, opened, MorphTypes.Open, kernel, iterations: 2);
+
+        // Use bounding box of all non-zero (card) pixels rather than contour detection,
+        // since the card interior may fragment into many small contours.
+        var bbox = Cv2.BoundingRect(opened);
+        var bboxArea = bbox.Width * bbox.Height;
+        var minArea = cell.Width * cell.Height * p.MinCardAreaRatio;
+        if (bboxArea < minArea)
+        {
+            _logger.LogDebug("Green-mask bounding box too small: {Area} vs min {Min}", bboxArea, minArea);
+            return null;
+        }
+
+        var aspect = (double)Math.Min(bbox.Width, bbox.Height) / Math.Max(bbox.Width, bbox.Height);
+        if (aspect < p.MinAspectRatio || aspect > p.MaxAspectRatio)
+        {
+            _logger.LogDebug("Green-mask bounding box aspect {Aspect:F2} outside range", aspect);
+            return null;
+        }
+
+        _logger.LogInformation("Green-mask detected card bounds: {Rect}, aspect={Aspect:F2}", bbox, aspect);
+        return bbox;
+    }
+
+    /// <summary>
     /// Detects whether a grid cell is empty (no card present).
     /// Uses edge density and color variance — a real card has printed content
     /// that produces many edges and higher color variation than an empty sleeve pocket.
@@ -144,6 +332,20 @@ public class CardImageExtractionService
     /// </summary>
     private Mat ExtractCardFromCell(Mat cell, ExtractionParams p)
     {
+        // Try green-background detection first — precise, no extra padding
+        var greenRect = FindBoundsFromGreenMask(cell, p);
+        if (greenRect != null)
+        {
+            // Tiny outward pad to compensate for green dilation eating into edges
+            var adjusted = PadRect(greenRect.Value, cell.Width, cell.Height, 0.005f);
+            if (adjusted.Width >= 50 && adjusted.Height >= 50)
+            {
+                using var cropped = new Mat(cell, adjusted);
+                return cropped.Clone();
+            }
+        }
+
+        // Fall back to edge-based detection with standard padding
         var rect = FindCardBounds(cell, p);
         if (rect != null)
         {

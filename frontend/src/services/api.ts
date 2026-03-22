@@ -142,6 +142,24 @@ export const pageApi = {
   assignExtractedImages(assignments: CardImageAssignment[]): Promise<void> {
     return api.post('/pages/assign-extracted-images', { assignments }).then(r => r.data);
   },
+
+  autoCrop(file: File): Promise<Blob> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/pages/auto-crop', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    }).then(r => r.data);
+  },
+
+  autoRotate(file: File): Promise<Blob> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/pages/auto-rotate', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    }).then(r => r.data);
+  },
 };
 
 // AI API
