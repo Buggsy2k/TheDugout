@@ -49,6 +49,7 @@ export interface PaginatedResult<T> {
 
 export interface CollectionStats {
   totalCards: number;
+  totalBinders: number;
   bySet: { setName: string; count: number }[];
   byYear: { year: number; count: number }[];
   byCondition: { condition: string; count: number }[];

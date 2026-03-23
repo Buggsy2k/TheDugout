@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CreditCard } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { BarChart3, BookOpen, CreditCard } from 'lucide-react';
 import { cardApi } from '../services/api';
 import type { CollectionStats } from '../types';
 import CardTile from '../components/CardTile';
 import LoadingSkeleton from '../components/LoadingSkeleton';
-import ConditionBadge from '../components/ConditionBadge';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<CollectionStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -43,11 +44,18 @@ export default function Dashboard() {
       <h1 className="page-title">Dashboard</h1>
 
       <div className="stats-grid">
-        <div className="stat-card">
+        <div className="stat-card clickable" onClick={() => navigate('/collection')}>
           <div className="stat-icon"><CreditCard size={24} /></div>
           <div className="stat-content">
             <span className="stat-label">Total Cards</span>
             <span className="stat-value">{stats.totalCards.toLocaleString()}</span>
+          </div>
+        </div>
+        <div className="stat-card clickable" onClick={() => navigate('/binders')}>
+          <div className="stat-icon"><BookOpen size={24} /></div>
+          <div className="stat-content">
+            <span className="stat-label">Binders</span>
+            <span className="stat-value">{stats.totalBinders}</span>
           </div>
         </div>
         <div className="stat-card">
@@ -76,20 +84,6 @@ export default function Dashboard() {
                 </div>
               );
             })}
-          </div>
-        </section>
-      )}
-
-      {stats.byCondition.length > 0 && (
-        <section className="dashboard-section">
-          <h2>Condition Breakdown</h2>
-          <div className="condition-grid">
-            {stats.byCondition.map(c => (
-              <div key={c.condition} className="condition-item">
-                <ConditionBadge condition={c.condition} size="md" />
-                <span className="condition-count">{c.count}</span>
-              </div>
-            ))}
           </div>
         </section>
       )}

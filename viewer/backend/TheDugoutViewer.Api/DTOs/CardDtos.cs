@@ -55,6 +55,7 @@ public class PaginatedResult<T>
 public class CollectionStats
 {
     public int TotalCards { get; set; }
+    public int TotalBinders { get; set; }
     public List<SetBreakdown> BySet { get; set; } = new();
     public List<YearBreakdown> ByYear { get; set; } = new();
     public List<ConditionBreakdown> ByCondition { get; set; } = new();

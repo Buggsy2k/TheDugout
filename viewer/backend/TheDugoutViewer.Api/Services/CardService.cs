@@ -106,10 +106,12 @@ public class CardService
     {
         var cards = _db.Cards.Where(c => !c.IsUnassigned);
         var totalCards = await cards.CountAsync();
+        var totalBinders = await cards.Select(c => c.BinderNumber).Distinct().CountAsync();
 
         return new CollectionStats
         {
             TotalCards = totalCards,
+            TotalBinders = totalBinders,
             BySet = await cards.GroupBy(c => c.SetName)
                 .Select(g => new SetBreakdown { SetName = g.Key, Count = g.Count() })
                 .OrderByDescending(s => s.Count)
