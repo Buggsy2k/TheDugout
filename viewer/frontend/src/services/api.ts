@@ -8,9 +8,9 @@ import type {
   BinderDetail,
 } from '../types';
 
-// In Docker, the API runs on the same host as the frontend (proxied via nginx)
-// In development, point to the backend port directly
-export const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8080`;
+// In Docker, nginx proxies /api/ to the backend — use relative paths (empty base).
+// In development, set VITE_API_BASE to point to the backend port directly.
+export const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 const api = axios.create({
   baseURL: `${API_BASE}/api`,

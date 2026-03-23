@@ -4,6 +4,7 @@
         "npx tsc": true,
         "dotnet build": true,
         "Copy-Item": true,
-        "npm install": true
+        "npm install": true,
+        ".\\sync-data.ps1": true
     }
 }

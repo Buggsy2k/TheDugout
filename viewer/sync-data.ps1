@@ -1,76 +1,74 @@
 # sync-data.ps1
-# Syncs database and card images from the local dev environment to the Synology viewer.
+# Prepares database dump and uploads archive for manual copy to the Synology NAS.
 #
-# Prerequisites:
-#   - Local PostgreSQL running (docker-compose up in the main project root)
-#   - SSH access to the Synology NAS configured (ssh keys recommended)
-#   - Docker Compose running on the Synology for the viewer
+# This script:
+#   1. Dumps the local PostgreSQL database from Docker
+#   2. Creates a tar.gz of uploaded card images
+#   3. Outputs everything to viewer\deploy\ for manual copy
+#
+# After running this script, copy the deploy\ folder to the NAS and run:
+#   sudo -i
+#   cd /volume1/docker/thedugout
+#   sh restore.sh
 #
 # Usage:
-#   .\sync-data.ps1 -SynologyHost "your-synology-ip-or-hostname"
-#                    -SynologyUser "your-ssh-user"
-#                    -RemotePath "/volume1/docker/thedugout-viewer"
+#   .\sync-data.ps1
 
 param(
-    [string]$SynologyHost = "thedugout.once-a-knight.com",
-    [string]$SynologyUser = "brian",
-    [string]$RemotePath = "/volume1/docker/thedugout-viewer",
     [string]$LocalUploadsPath = "..\backend\TheDugout.Api\uploads",
-    [string]$LocalDbHost = "localhost",
-    [int]$LocalDbPort = 5432,
+    [string]$LocalDbContainer = "thedugout-db",
     [string]$DbName = "thedugout",
     [string]$DbUser = "thedugout"
 )
 
 $ErrorActionPreference = "Stop"
-$tempDump = Join-Path $env:TEMP "thedugout_dump.sql"
+$viewerRoot = $PSScriptRoot
+$outputDir = Join-Path $viewerRoot "deploy"
+New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
-Write-Host "=== The Dugout Data Sync ===" -ForegroundColor Cyan
+$dumpFile = Join-Path $outputDir "db_dump.sql"
+$tarFile = Join-Path $outputDir "uploads.tar.gz"
+
+Write-Host "=== The Dugout Data Sync — Prepare ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Step 1: Dump local database
-Write-Host "[1/4] Dumping local database..." -ForegroundColor Yellow
-$env:PGPASSWORD = "DugoutDev2024!"
-pg_dump -h $LocalDbHost -p $LocalDbPort -U $DbUser -d $DbName --clean --if-exists --no-owner --no-acl -f $tempDump
+# Copy restore.sh into deploy folder
+$restoreScript = Join-Path $viewerRoot "restore.sh"
+if (Test-Path $restoreScript) {
+    Copy-Item $restoreScript $outputDir -Force
+}
 
-if (-not (Test-Path $tempDump)) {
+# Step 1: Dump local database
+Write-Host "[1/2] Dumping local database..." -ForegroundColor Yellow
+docker exec $LocalDbContainer pg_dump -U $DbUser -d $DbName --clean --if-exists --no-owner --no-acl > $dumpFile
+
+if (-not (Test-Path $dumpFile) -or (Get-Item $dumpFile).Length -eq 0) {
     Write-Host "ERROR: Database dump failed." -ForegroundColor Red
     exit 1
 }
 
-$dumpSize = (Get-Item $tempDump).Length / 1MB
-Write-Host "  Dump created: $([math]::Round($dumpSize, 2)) MB" -ForegroundColor Green
+$dumpSize = [math]::Round((Get-Item $dumpFile).Length / 1MB, 2)
+Write-Host "  Dump created: $dumpSize MB" -ForegroundColor Green
 
-# Step 2: Upload dump to Synology
-Write-Host "[2/4] Uploading database dump to Synology..." -ForegroundColor Yellow
-scp $tempDump "${SynologyUser}@${SynologyHost}:${RemotePath}/db_dump.sql"
-Write-Host "  Upload complete." -ForegroundColor Green
-
-# Step 3: Restore dump on Synology's Docker PostgreSQL
-Write-Host "[3/4] Restoring database on Synology..." -ForegroundColor Yellow
-ssh "${SynologyUser}@${SynologyHost}" @"
-cd $RemotePath
-docker compose exec -T db psql -U $DbUser -d $DbName < db_dump.sql
-rm -f db_dump.sql
-"@
-Write-Host "  Database restored." -ForegroundColor Green
-
-# Step 4: Sync uploaded images via rsync
-Write-Host "[4/4] Syncing card images..." -ForegroundColor Yellow
+# Step 2: Create uploads archive
+Write-Host "[2/2] Archiving card images..." -ForegroundColor Yellow
 $resolvedUploads = (Resolve-Path $LocalUploadsPath).Path
+tar -czf $tarFile -C $resolvedUploads .
 
-# Use rsync if available (WSL or native), otherwise fall back to scp
-if (Get-Command rsync -ErrorAction SilentlyContinue) {
-    rsync -avz --delete "${resolvedUploads}/" "${SynologyUser}@${SynologyHost}:${RemotePath}/uploads/"
-} else {
-    Write-Host "  rsync not found, using scp (this may be slower)..." -ForegroundColor DarkYellow
-    scp -r "${resolvedUploads}\*" "${SynologyUser}@${SynologyHost}:${RemotePath}/uploads/"
-}
-Write-Host "  Images synced." -ForegroundColor Green
-
-# Cleanup
-Remove-Item $tempDump -ErrorAction SilentlyContinue
+$tarSize = [math]::Round((Get-Item $tarFile).Length / 1MB, 2)
+Write-Host "  Uploads archive: $tarSize MB" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "=== Sync complete! ===" -ForegroundColor Cyan
-Write-Host "Viewer should be live at: http://thedugout.once-a-knight.com"
+Write-Host "=== Sync files ready! ===" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Output in: $outputDir" -ForegroundColor Green
+Write-Host "  - db_dump.sql ($dumpSize MB)"
+Write-Host "  - uploads.tar.gz ($tarSize MB)"
+Write-Host "  - restore.sh (run this on the NAS)"
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor DarkYellow
+Write-Host "  1. Copy deploy\ contents to NAS at /volume1/docker/thedugout"
+Write-Host "  2. SSH into the NAS:  ssh -p 2222 buggsy@192.168.1.18"
+Write-Host "  3. sudo -i"
+Write-Host "  4. cd /volume1/docker/thedugout"
+Write-Host "  5. sh restore.sh"
