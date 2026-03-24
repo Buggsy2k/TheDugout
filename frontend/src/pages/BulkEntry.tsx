@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, Eye, ImagePlus, RefreshCw, Wand2, Undo2, ChevronLeft, ChevronRight, AlignVerticalSpaceAround, ImageOff, Check, X } from 'lucide-react';
+import { Upload, Sparkles, LayoutGrid, Columns, RotateCw, Crop, Eye, ImagePlus, RefreshCw, Wand2, Undo2, ChevronLeft, ChevronRight, AlignVerticalSpaceAround, ImageOff, Check, X, Grid3x3 } from 'lucide-react';
 import { cardApi, pageApi, aiApi, binderApi, API_BASE } from '../services/api';
 import type { CreateCard, Card, NextAvailableSuggestion, ExtractedCardImage, CardImageAssignment } from '../types';
 import ImageCropDialog from '../components/ImageCropDialog';
@@ -131,6 +131,7 @@ export default function BulkEntry() {
   const [lightbox, setLightbox] = useState<{ src: string; row: number; col: number; side: 'front' | 'back' } | null>(null);
   const [originalLightboxSrc, setOriginalLightboxSrc] = useState<string | null>(null);
   const [lightboxRotation, setLightboxRotation] = useState(0);
+  const [gridWhite, setGridWhite] = useState(false);
   const [lightboxCropMode, setLightboxCropMode] = useState(false);
   const lbCrop = useLightboxCrop();
   const cropConfirmRef = useRef<() => void>(() => {});
@@ -715,13 +716,16 @@ export default function BulkEntry() {
   };
 
   const extractCardImages = async () => {
-    if (!pageImage) return;
+    if (!pageImage && !backImage) return;
     setExtracting(true);
     // Clear manual crops so re-extracted images are visible
     setCroppedImages(Array.from({ length: 3 }, () => Array.from({ length: numCols }, () => null)));
     setCroppedBackImages(Array.from({ length: 3 }, () => Array.from({ length: numCols }, () => null)));
     try {
-      const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front', extractionParams);
+      let frontExtracts: ExtractedCardImage[] = [];
+      if (pageImage) {
+        frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front', extractionParams);
+      }
       let backExtracts: ExtractedCardImage[] = [];
       if (backImage) {
         backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back', extractionParams);
@@ -751,7 +755,11 @@ export default function BulkEntry() {
         return fresh;
       });
       const frontCount = frontExtracts.length;
-      toast.success(`Extracted ${frontCount} card image${frontCount !== 1 ? 's' : ''}${backExtracts.length > 0 ? ' (front + back)' : ''}`);
+      const backCount = backExtracts.length;
+      const parts: string[] = [];
+      if (frontCount > 0) parts.push(`${frontCount} front`);
+      if (backCount > 0) parts.push(`${backCount} back`);
+      toast.success(`Extracted ${parts.join(' + ')} card image${(frontCount + backCount) !== 1 ? 's' : ''}`);
     } catch {
       toast.error('Image extraction failed');
     } finally {
@@ -761,11 +769,14 @@ export default function BulkEntry() {
 
   // Auto-extract card images when front or back page image changes
   useEffect(() => {
-    if (!pageImage) return;
+    if (!pageImage && !backImage) return;
     const extract = async () => {
       setExtracting(true);
       try {
-        const frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front', extractionParams);
+        let frontExtracts: ExtractedCardImage[] = [];
+        if (pageImage) {
+          frontExtracts = await pageApi.extractCards(pageImage, layout, binderNumber, pageNumber, 'front', extractionParams);
+        }
         let backExtracts: ExtractedCardImage[] = [];
         if (backImage) {
           backExtracts = await pageApi.extractCards(backImage, layout, binderNumber, pageNumber, 'back', extractionParams);
@@ -794,7 +805,11 @@ export default function BulkEntry() {
           return fresh;
         });
         const frontCount = frontExtracts.length;
-        toast.success(`Extracted ${frontCount} card image${frontCount !== 1 ? 's' : ''}${backExtracts.length > 0 ? ' (front + back)' : ''}`);
+        const backCount = backExtracts.length;
+        const parts: string[] = [];
+        if (frontCount > 0) parts.push(`${frontCount} front`);
+        if (backCount > 0) parts.push(`${backCount} back`);
+        toast.success(`Extracted ${parts.join(' + ')} card image${(frontCount + backCount) !== 1 ? 's' : ''}`);
       } catch {
         toast.error('Image extraction failed');
       } finally {
@@ -1148,6 +1163,8 @@ export default function BulkEntry() {
                 </button>
               </div>
             </div>
+          </div>
+          <div className="form-row">
             <div className="form-group">
               <label>Binder Number</label>
               <input
@@ -1225,29 +1242,122 @@ export default function BulkEntry() {
               )}
             </div>
           )}
+
+          {/* Extraction Settings */}
+          {(pageImage || backImage) && (
+            <div className="extraction-settings-section">
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowExtractionSettings(!showExtractionSettings)}
+              >
+                {showExtractionSettings ? '▾ Hide' : '▸ Show'} Extraction Settings
+              </button>
+              {showExtractionSettings && (
+                <div className="extraction-settings-grid">
+                  <div className="extraction-setting">
+                    <label>Canny Low <span className="hint">({extractionParams.cannyLow})</span></label>
+                    <input type="range" min={5} max={150} step={5} value={extractionParams.cannyLow}
+                      onChange={e => updateExtractionParam('cannyLow', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Canny High <span className="hint">({extractionParams.cannyHigh})</span></label>
+                    <input type="range" min={30} max={300} step={5} value={extractionParams.cannyHigh}
+                      onChange={e => updateExtractionParam('cannyHigh', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Blur Size <span className="hint">({extractionParams.blurSize})</span></label>
+                    <input type="range" min={1} max={15} step={2} value={extractionParams.blurSize}
+                      onChange={e => updateExtractionParam('blurSize', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Morph Iterations <span className="hint">({extractionParams.morphIterations})</span></label>
+                    <input type="range" min={1} max={5} step={1} value={extractionParams.morphIterations}
+                      onChange={e => updateExtractionParam('morphIterations', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Contour Padding <span className="hint">({(extractionParams.contourPadding * 100).toFixed(0)}%)</span></label>
+                    <input type="range" min={0} max={0.1} step={0.005} value={extractionParams.contourPadding}
+                      onChange={e => updateExtractionParam('contourPadding', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Fallback Margin <span className="hint">({(extractionParams.fallbackMargin * 100).toFixed(0)}%)</span></label>
+                    <input type="range" min={0} max={0.15} step={0.005} value={extractionParams.fallbackMargin}
+                      onChange={e => updateExtractionParam('fallbackMargin', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Min Card Area <span className="hint">({(extractionParams.minCardAreaRatio * 100).toFixed(0)}%)</span></label>
+                    <input type="range" min={0.1} max={0.5} step={0.05} value={extractionParams.minCardAreaRatio}
+                      onChange={e => updateExtractionParam('minCardAreaRatio', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Min Aspect Ratio <span className="hint">({extractionParams.minAspectRatio.toFixed(2)})</span></label>
+                    <input type="range" min={0.2} max={0.8} step={0.05} value={extractionParams.minAspectRatio}
+                      onChange={e => updateExtractionParam('minAspectRatio', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting">
+                    <label>Max Aspect Ratio <span className="hint">({extractionParams.maxAspectRatio.toFixed(2)})</span></label>
+                    <input type="range" min={0.7} max={1.0} step={0.05} value={extractionParams.maxAspectRatio}
+                      onChange={e => updateExtractionParam('maxAspectRatio', Number(e.target.value))} />
+                  </div>
+                  <div className="extraction-setting extraction-preset-actions">
+                    <select
+                      value={selectedPresetName}
+                      onChange={e => loadPreset(e.target.value)}
+                      className="preset-select"
+                    >
+                      <option value="">— Presets —</option>
+                      {extractionPresets.map(p => (
+                        <option key={p.name} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={savePreset} title="Save current settings as preset">
+                      Save
+                    </button>
+                    {selectedPresetName && (
+                      <button type="button" className="btn btn-sm btn-danger" onClick={deletePreset} title="Delete selected preset">
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                  <div className="extraction-setting extraction-setting-actions">
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => {
+                      setExtractionParams(DEFAULT_EXTRACTION_PARAMS);
+                      setSelectedPresetName('');
+                    }}>
+                      Reset Defaults
+                    </button>
+                    <button type="button" className="btn btn-sm btn-primary" onClick={extractCardImages} disabled={extracting}>
+                      {extracting ? 'Re-extracting...' : 'Re-extract with Settings'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="bulk-header-image">
-          <label>Page Photo — Front (optional)</label>
-          <div className="page-image-upload">
-            {pageImagePreview ? (
-              <img src={pageImagePreview} alt="Page" className="page-image-preview" />
-            ) : (
-              <div className="page-image-placeholder">
-                <Upload size={24} />
-                <span>Upload front photo</span>
-              </div>
-            )}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/tiff"
-              onChange={handlePageImageChange}
-              onClick={e => { (e.target as HTMLInputElement).value = ''; }}
-              className="image-input"
-            />
-          </div>
-          {pageImage && mode === 'new' && (
-            <>
+        <div className="bulk-header-images">
+          <div className="bulk-header-image">
+            <label>Front (optional)</label>
+            <div className="page-image-upload">
+              {pageImagePreview ? (
+                <img src={pageImagePreview} alt="Page" className="page-image-preview" />
+              ) : (
+                <div className="page-image-placeholder">
+                  <Upload size={24} />
+                  <span>Upload front photo</span>
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/tiff"
+                onChange={handlePageImageChange}
+                onClick={e => { (e.target as HTMLInputElement).value = ''; }}
+                className="image-input"
+              />
+            </div>
+            {pageImage && mode === 'new' && (
               <button
                 type="button"
                 className="btn btn-accent btn-ai"
@@ -1255,123 +1365,42 @@ export default function BulkEntry() {
                 disabled={scanning || extracting}
               >
                 <Sparkles size={16} />
-                {scanning ? 'Scanning...' : 'Scan Page with AI'}
+                {scanning ? 'Scanning...' : 'Scan with AI'}
               </button>
-            </>
-          )}
-          <label style={{ marginTop: '0.75rem' }}>Page Photo — Back (optional)</label>
-          <div className="page-image-upload">
-            {backImagePreview ? (
-              <img src={backImagePreview} alt="Back" className="page-image-preview" />
-            ) : (
-              <div className="page-image-placeholder">
-                <RotateCw size={24} />
-                <span>Upload back photo</span>
-              </div>
             )}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/tiff"
-              onChange={handleBackImageChange}
-              onClick={e => { (e.target as HTMLInputElement).value = ''; }}
-              className="image-input"
-            />
+            {pageImage && (
+              <button type="button" className="btn btn-sm btn-ghost clear-image-btn" onClick={() => { setPageImage(null); setPageImagePreview(null); }}>
+                <X size={14} /> Clear
+              </button>
+            )}
+          </div>
+          <div className="bulk-header-image">
+            <label>Back (optional)</label>
+            <div className="page-image-upload">
+              {backImagePreview ? (
+                <img src={backImagePreview} alt="Back" className="page-image-preview" />
+              ) : (
+                <div className="page-image-placeholder">
+                  <RotateCw size={24} />
+                  <span>Upload back photo</span>
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/tiff"
+                onChange={handleBackImageChange}
+                onClick={e => { (e.target as HTMLInputElement).value = ''; }}
+                className="image-input"
+              />
+            </div>
+            {backImage && (
+              <button type="button" className="btn btn-sm btn-ghost clear-image-btn" onClick={() => { setBackImage(null); setBackImagePreview(null); }}>
+                <X size={14} /> Clear
+              </button>
+            )}
           </div>
         </div>
       </div>
-
-      {/* Extraction Settings */}
-      {pageImage && (
-        <div className="extraction-settings-section">
-          <button
-            type="button"
-            className="btn btn-sm btn-secondary"
-            onClick={() => setShowExtractionSettings(!showExtractionSettings)}
-          >
-            {showExtractionSettings ? '▾ Hide' : '▸ Show'} Extraction Settings
-          </button>
-          {showExtractionSettings && (
-            <div className="extraction-settings-grid">
-              <div className="extraction-setting">
-                <label>Canny Low <span className="hint">({extractionParams.cannyLow})</span></label>
-                <input type="range" min={5} max={150} step={5} value={extractionParams.cannyLow}
-                  onChange={e => updateExtractionParam('cannyLow', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Canny High <span className="hint">({extractionParams.cannyHigh})</span></label>
-                <input type="range" min={30} max={300} step={5} value={extractionParams.cannyHigh}
-                  onChange={e => updateExtractionParam('cannyHigh', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Blur Size <span className="hint">({extractionParams.blurSize})</span></label>
-                <input type="range" min={1} max={15} step={2} value={extractionParams.blurSize}
-                  onChange={e => updateExtractionParam('blurSize', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Morph Iterations <span className="hint">({extractionParams.morphIterations})</span></label>
-                <input type="range" min={1} max={5} step={1} value={extractionParams.morphIterations}
-                  onChange={e => updateExtractionParam('morphIterations', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Contour Padding <span className="hint">({(extractionParams.contourPadding * 100).toFixed(0)}%)</span></label>
-                <input type="range" min={0} max={0.1} step={0.005} value={extractionParams.contourPadding}
-                  onChange={e => updateExtractionParam('contourPadding', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Fallback Margin <span className="hint">({(extractionParams.fallbackMargin * 100).toFixed(0)}%)</span></label>
-                <input type="range" min={0} max={0.15} step={0.005} value={extractionParams.fallbackMargin}
-                  onChange={e => updateExtractionParam('fallbackMargin', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Min Card Area <span className="hint">({(extractionParams.minCardAreaRatio * 100).toFixed(0)}%)</span></label>
-                <input type="range" min={0.1} max={0.5} step={0.05} value={extractionParams.minCardAreaRatio}
-                  onChange={e => updateExtractionParam('minCardAreaRatio', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Min Aspect Ratio <span className="hint">({extractionParams.minAspectRatio.toFixed(2)})</span></label>
-                <input type="range" min={0.2} max={0.8} step={0.05} value={extractionParams.minAspectRatio}
-                  onChange={e => updateExtractionParam('minAspectRatio', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting">
-                <label>Max Aspect Ratio <span className="hint">({extractionParams.maxAspectRatio.toFixed(2)})</span></label>
-                <input type="range" min={0.7} max={1.0} step={0.05} value={extractionParams.maxAspectRatio}
-                  onChange={e => updateExtractionParam('maxAspectRatio', Number(e.target.value))} />
-              </div>
-              <div className="extraction-setting extraction-preset-actions">
-                <select
-                  value={selectedPresetName}
-                  onChange={e => loadPreset(e.target.value)}
-                  className="preset-select"
-                >
-                  <option value="">— Presets —</option>
-                  {extractionPresets.map(p => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
-                <button type="button" className="btn btn-sm btn-secondary" onClick={savePreset} title="Save current settings as preset">
-                  Save
-                </button>
-                {selectedPresetName && (
-                  <button type="button" className="btn btn-sm btn-danger" onClick={deletePreset} title="Delete selected preset">
-                    Delete
-                  </button>
-                )}
-              </div>
-              <div className="extraction-setting extraction-setting-actions">
-                <button type="button" className="btn btn-sm btn-secondary" onClick={() => {
-                  setExtractionParams(DEFAULT_EXTRACTION_PARAMS);
-                  setSelectedPresetName('');
-                }}>
-                  Reset Defaults
-                </button>
-                <button type="button" className="btn btn-sm btn-primary" onClick={extractCardImages} disabled={extracting}>
-                  {extracting ? 'Re-extracting...' : 'Re-extract with Settings'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Composite mosaic of all current images */}
       {(extractedImages.some(row => row.some(c => c !== null)) || (mode === 'update-images' && existingCards.some(c => c.imagePath || c.backImagePath))) && (
@@ -1402,6 +1431,31 @@ export default function BulkEntry() {
                 </button>
               </div>
             )}
+            <div className="bulk-actions-inline">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(-1)}>
+                Cancel
+              </button>
+              {mode === 'update-images' ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={handleUpdateImages}
+                  disabled={saving || existingCards.length === 0}
+                >
+                  <ImagePlus size={16} />
+                  {saving ? 'Updating...' : 'Update Images'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={handleSaveAll}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : 'Save All Cards'}
+                </button>
+              )}
+            </div>
           </div>
           {showMosaic && (
             <div className={`mosaic-grid mosaic-cols-${numCols}`}>
@@ -1579,31 +1633,7 @@ export default function BulkEntry() {
         ))}
       </div>
 
-      <div className="bulk-actions">
-        <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}>
-          Cancel
-        </button>
-        {mode === 'update-images' ? (
-          <button
-            type="button"
-            className="btn btn-primary btn-lg"
-            onClick={handleUpdateImages}
-            disabled={saving || existingCards.length === 0}
-          >
-            <ImagePlus size={18} />
-            {saving ? 'Updating...' : 'Update Images'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-primary btn-lg"
-            onClick={handleSaveAll}
-            disabled={saving}
-          >
-            {saving ? 'Saving...' : 'Save All Cards'}
-          </button>
-        )}
-      </div>
+
 
       {showConflictDialog && (
         <ConflictOverwriteDialog
@@ -1717,27 +1747,37 @@ export default function BulkEntry() {
                   <button className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.5)} title="Rotate 0.5° left" disabled={lightboxCropMode}>
                     -.5
                   </button>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.2)} title="Rotate 0.2° left" disabled={lightboxCropMode}>
-                    -.2
+                  <button className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.1)} title="Rotate 0.1° left" disabled={lightboxCropMode}>
+                    -.1
                   </button>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.2)} title="Rotate 0.2° right" disabled={lightboxCropMode}>
-                    +.2
+                  <button className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.1)} title="Rotate 0.1° right" disabled={lightboxCropMode}>
+                    +.1
                   </button>
                   <button className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.5)} title="Rotate 0.5° right" disabled={lightboxCropMode}>
                     +.5
                   </button>
                 </div>
-                {lightboxRotation !== 0 && (
-                  <button className="btn btn-sm btn-primary btn-icon-only" onClick={() => applyLightboxRotation()} title="Apply rotation">
+              </div>
+              {!lightboxCropMode && (
+                <div className="lightbox-apply-group">
+                  <button
+                    className="btn btn-sm btn-primary btn-icon-only"
+                    onClick={() => applyLightboxRotation()}
+                    disabled={lightboxRotation === 0}
+                    title="Apply rotation"
+                  >
                     <Check size={16} />
                   </button>
-                )}
-                {lightboxRotation !== 0 && (
-                  <button className="btn btn-sm btn-ghost" onClick={() => { setLightboxRotation(0); setRotationDegrees(0); }} title="Cancel rotation (Esc)">
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => { setLightboxRotation(0); setRotationDegrees(0); }}
+                    disabled={lightboxRotation === 0}
+                    title="Cancel rotation (Esc)"
+                  >
                     <X size={14} />
                   </button>
-                )}
-              </div>
+                </div>
+              )}
               <button
                 className={`btn btn-sm ${lightboxCropMode ? 'btn-accent' : 'btn-secondary'}`}
                 onClick={(e) => {
@@ -1752,14 +1792,23 @@ export default function BulkEntry() {
                 <Crop size={16} /> Crop
               </button>
               {lightboxCropMode && (
-                <button className="btn btn-sm btn-ghost" onClick={() => { setLightboxCropMode(false); lbCrop.reset(); }} title="Cancel crop">
-                  <X size={14} />
-                </button>
-              )}
-              {lightboxCropMode && lbCrop.hasSelection && (
-                <button className="btn btn-sm btn-primary btn-icon-only" onClick={handleLightboxCropConfirm} title="Apply crop">
-                  <Check size={16} />
-                </button>
+                <div className="lightbox-apply-group">
+                  <button
+                    className="btn btn-sm btn-primary btn-icon-only"
+                    onClick={handleLightboxCropConfirm}
+                    disabled={!lbCrop.hasSelection}
+                    title="Apply crop"
+                  >
+                    <Check size={16} />
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => { setLightboxCropMode(false); lbCrop.reset(); }}
+                    title="Cancel crop (Esc)"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               )}
               <button
                 className="btn btn-sm btn-secondary"
@@ -1830,7 +1879,18 @@ export default function BulkEntry() {
                     className="lightbox-image"
                     style={lightboxRotation !== 0 && !showOriginalInLightbox ? { transform: `rotate(${lightboxRotation}deg)` } : undefined}
                   />
-                  {lightboxRotation !== 0 && !showOriginalInLightbox && <div className="rotation-grid-overlay" />}
+                  {lightboxRotation !== 0 && !showOriginalInLightbox && (
+                    <>
+                      <div className={`rotation-grid-overlay${gridWhite ? ' grid-white' : ''}`} />
+                      <button
+                        className={`grid-toggle-btn${gridWhite ? ' grid-white' : ''}`}
+                        onClick={() => setGridWhite(g => !g)}
+                        title={gridWhite ? 'Switch grid to black' : 'Switch grid to white'}
+                      >
+                        <Grid3x3 size={16} />
+                      </button>
+                    </>
+                  )}
                 </div>
                 {showOriginalInLightbox && (
                   <div style={{ textAlign: 'center', padding: '4px 0', color: '#f59e0b', fontSize: '0.85rem', fontWeight: 500 }}>

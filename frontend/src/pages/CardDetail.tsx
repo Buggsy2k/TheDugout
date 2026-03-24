@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera, Crop, Wand2, Undo2, AlignVerticalSpaceAround, Check, X } from 'lucide-react';
+import { Save, Trash2, ArrowLeft, Upload, Sparkles, RotateCw, Camera, Crop, Wand2, Undo2, AlignVerticalSpaceAround, Check, X, Grid3x3 } from 'lucide-react';
 import { cardApi, binderApi, aiApi, pageApi, API_BASE } from '../services/api';
 import type { Card, CreateCard, UpdateCard, Binder, NextAvailableSuggestion } from '../types';
 import { CONDITIONS } from '../types';
@@ -54,6 +54,7 @@ export default function CardDetail() {
   const [originalLightboxSrc, setOriginalLightboxSrc] = useState<string | null>(null);
   const [originalLightboxFile, setOriginalLightboxFile] = useState<{ file: File | null; preview: string | null } | null>(null);
   const [lightboxRotation, setLightboxRotation] = useState(0);
+  const [gridWhite, setGridWhite] = useState(false);
   const [rotationDegrees, setRotationDegrees] = useState(0);
   const [lightboxCropMode, setLightboxCropMode] = useState(false);
   const lbCrop = useLightboxCrop();
@@ -955,27 +956,39 @@ export default function CardDetail() {
                   <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.5)} title="Rotate 0.5° left" disabled={lightboxCropMode}>
                     -.5
                   </button>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.2)} title="Rotate 0.2° left" disabled={lightboxCropMode}>
-                    -.2
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev - 0.1)} title="Rotate 0.1° left" disabled={lightboxCropMode}>
+                    -.1
                   </button>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.2)} title="Rotate 0.2° right" disabled={lightboxCropMode}>
-                    +.2
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.1)} title="Rotate 0.1° right" disabled={lightboxCropMode}>
+                    +.1
                   </button>
                   <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLightboxRotation(prev => prev + 0.5)} title="Rotate 0.5° right" disabled={lightboxCropMode}>
                     +.5
                   </button>
                 </div>
-                {lightboxRotation !== 0 && (
-                  <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={() => applyLightboxRotation()} title="Apply rotation">
+              </div>
+              {!lightboxCropMode && (
+                <div className="lightbox-apply-group">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary btn-icon-only"
+                    onClick={() => applyLightboxRotation()}
+                    disabled={lightboxRotation === 0}
+                    title="Apply rotation"
+                  >
                     <Check size={16} />
                   </button>
-                )}
-                {lightboxRotation !== 0 && (
-                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setLightboxRotation(0); setRotationDegrees(0); }} title="Cancel rotation (Esc)">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => { setLightboxRotation(0); setRotationDegrees(0); }}
+                    disabled={lightboxRotation === 0}
+                    title="Cancel rotation (Esc)"
+                  >
                     <X size={14} />
                   </button>
-                )}
-              </div>
+                </div>
+              )}
               <button
                 type="button"
                 className={`btn btn-sm ${lightboxCropMode ? 'btn-accent' : 'btn-secondary'}`}
@@ -991,14 +1004,25 @@ export default function CardDetail() {
                 <Crop size={16} /> Crop
               </button>
               {lightboxCropMode && (
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setLightboxCropMode(false); lbCrop.reset(); }} title="Cancel crop">
-                  <X size={14} />
-                </button>
-              )}
-              {lightboxCropMode && lbCrop.hasSelection && (
-                <button type="button" className="btn btn-sm btn-primary btn-icon-only" onClick={handleLightboxCropConfirm} title="Apply crop">
-                  <Check size={16} />
-                </button>
+                <div className="lightbox-apply-group">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary btn-icon-only"
+                    onClick={handleLightboxCropConfirm}
+                    disabled={!lbCrop.hasSelection}
+                    title="Apply crop"
+                  >
+                    <Check size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => { setLightboxCropMode(false); lbCrop.reset(); }}
+                    title="Cancel crop (Esc)"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               )}
               <button
                 type="button"
@@ -1050,7 +1074,18 @@ export default function CardDetail() {
                   className="lightbox-image"
                   style={lightboxRotation !== 0 ? { transform: `rotate(${lightboxRotation}deg)` } : undefined}
                 />
-                {lightboxRotation !== 0 && <div className="rotation-grid-overlay" />}
+                {lightboxRotation !== 0 && (
+                  <>
+                    <div className={`rotation-grid-overlay${gridWhite ? ' grid-white' : ''}`} />
+                    <button
+                      className={`grid-toggle-btn${gridWhite ? ' grid-white' : ''}`}
+                      onClick={() => setGridWhite(g => !g)}
+                      title={gridWhite ? 'Switch grid to black' : 'Switch grid to white'}
+                    >
+                      <Grid3x3 size={16} />
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

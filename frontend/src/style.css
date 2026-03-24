@@ -1289,13 +1289,35 @@ a:hover {
 
 .bulk-header {
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: 1fr auto;
   gap: 24px;
   margin-bottom: 24px;
 }
 
 .bulk-header-fields {
   flex: 1;
+}
+
+.bulk-header-images {
+  display: flex;
+  gap: 16px;
+}
+
+.bulk-header-image {
+  width: 200px;
+}
+
+.bulk-header-image label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.clear-image-btn {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .page-image-upload {
@@ -1337,7 +1359,8 @@ a:hover {
 
 /* Extraction Settings */
 .extraction-settings-section {
-  margin-bottom: 16px;
+  margin-top: 12px;
+  margin-bottom: 0;
   padding: 12px 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -1401,6 +1424,13 @@ a:hover {
   align-items: center;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.bulk-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .mosaic-toggle {
@@ -1817,12 +1847,50 @@ a:hover {
   right: 20px;
   bottom: 20px;
   pointer-events: none;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  background-size: 16.66% 33.33%;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background-size: 3.33% 6.67%;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
+    linear-gradient(to right, rgba(0, 0, 0, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.15) 1px, transparent 1px);
   z-index: 1;
+}
+
+.rotation-grid-overlay.grid-white {
+  border-color: rgba(255, 255, 255, 0.35);
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+}
+
+.grid-toggle-btn {
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.grid-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.grid-toggle-btn.grid-white {
+  background: rgba(255, 255, 255, 0.45);
+  color: #000;
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.grid-toggle-btn.grid-white:hover {
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .lightbox-rotate-controls {
@@ -1832,6 +1900,12 @@ a:hover {
 }
 
 .rotate-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.lightbox-apply-group {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1918,7 +1992,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 40px 8px;
   overflow: auto;
   max-height: 80vh;
 }
