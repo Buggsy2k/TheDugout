@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using TheDugout.Api.Data;
 using TheDugout.Api.DTOs;
@@ -9,9 +10,17 @@ public class CardService
 {
     private readonly AppDbContext _db;
 
+    private static readonly TextInfo TextInfo = CultureInfo.InvariantCulture.TextInfo;
+
     public CardService(AppDbContext db)
     {
         _db = db;
+    }
+
+    private static string ToTitleCase(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return name;
+        return TextInfo.ToTitleCase(name.Trim().ToLowerInvariant());
     }
 
     public async Task<PaginatedResult<CardDto>> GetCardsAsync(CardQueryParams query)
@@ -140,11 +149,11 @@ public class CardService
             PageNumber = dto.PageNumber,
             Row = dto.Row,
             Column = dto.Column,
-            PlayerName = dto.PlayerName,
+            PlayerName = ToTitleCase(dto.PlayerName),
             Year = dto.Year,
-            SetName = dto.SetName,
+            SetName = ToTitleCase(dto.SetName),
             CardNumber = dto.CardNumber,
-            Team = dto.Team,
+            Team = dto.Team != null ? ToTitleCase(dto.Team) : dto.Team,
             Manufacturer = dto.Manufacturer,
             EstimatedCondition = dto.EstimatedCondition,
             ConditionNotes = dto.ConditionNotes,
@@ -173,11 +182,11 @@ public class CardService
         card.PageNumber = dto.PageNumber;
         card.Row = dto.Row;
         card.Column = dto.Column;
-        card.PlayerName = dto.PlayerName;
+        card.PlayerName = ToTitleCase(dto.PlayerName);
         card.Year = dto.Year;
-        card.SetName = dto.SetName;
+        card.SetName = ToTitleCase(dto.SetName);
         card.CardNumber = dto.CardNumber;
-        card.Team = dto.Team;
+        card.Team = dto.Team != null ? ToTitleCase(dto.Team) : dto.Team;
         card.Manufacturer = dto.Manufacturer;
         card.EstimatedCondition = dto.EstimatedCondition;
         card.ConditionNotes = dto.ConditionNotes;
@@ -224,11 +233,11 @@ public class CardService
             PageNumber = dto.PageNumber,
             Row = dto.Row,
             Column = dto.Column,
-            PlayerName = dto.PlayerName,
+            PlayerName = ToTitleCase(dto.PlayerName),
             Year = dto.Year,
-            SetName = dto.SetName,
+            SetName = ToTitleCase(dto.SetName),
             CardNumber = dto.CardNumber,
-            Team = dto.Team,
+            Team = dto.Team != null ? ToTitleCase(dto.Team) : dto.Team,
             Manufacturer = dto.Manufacturer,
             EstimatedCondition = dto.EstimatedCondition,
             ConditionNotes = dto.ConditionNotes,

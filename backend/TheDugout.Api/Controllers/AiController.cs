@@ -238,11 +238,17 @@ public class AiController : ControllerBase
                 }
 
                 var aiResult = response.Result;
-                card.PlayerName = aiResult.PlayerName ?? card.PlayerName;
+                card.PlayerName = aiResult.PlayerName != null
+                    ? System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(aiResult.PlayerName.Trim().ToLowerInvariant())
+                    : card.PlayerName;
                 card.Year = aiResult.Year ?? card.Year;
-                card.SetName = aiResult.SetName ?? card.SetName;
+                card.SetName = aiResult.SetName != null
+                    ? System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(aiResult.SetName.Trim().ToLowerInvariant())
+                    : card.SetName;
                 card.CardNumber = aiResult.CardNumber ?? card.CardNumber;
-                card.Team = aiResult.Team ?? card.Team;
+                card.Team = aiResult.Team != null
+                    ? System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(aiResult.Team.Trim().ToLowerInvariant())
+                    : card.Team;
                 card.Manufacturer = aiResult.Manufacturer ?? card.Manufacturer;
                 card.EstimatedCondition = aiResult.EstimatedCondition ?? card.EstimatedCondition;
                 card.ConditionNotes = aiResult.ConditionNotes ?? card.ConditionNotes;
