@@ -477,30 +477,33 @@ export default function BulkEntry() {
       ctx.rotate(rad);
       ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
 
-      canvas.toBlob(blob => {
-        if (!blob || !lightbox) return;
-        const file = new File([blob], `rotated_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const previewUrl = URL.createObjectURL(blob);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      const byteStr = atob(dataUrl.split(',')[1]);
+      const ab = new ArrayBuffer(byteStr.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+      const blob = new Blob([ab], { type: 'image/jpeg' });
+      const file = new File([blob], `rotated_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const previewUrl = URL.createObjectURL(blob);
 
-        const setter = lightbox.side === 'front' ? setCroppedImages : setCroppedBackImages;
-        setter(prev => {
-          const updated = prev.map(r => [...r]);
-          if (updated[lightbox.row][lightbox.col]) {
-            URL.revokeObjectURL(updated[lightbox.row][lightbox.col]!.previewUrl);
-          }
-          updated[lightbox.row][lightbox.col] = { file, previewUrl };
-          return updated;
-        });
+      const setter = lightbox.side === 'front' ? setCroppedImages : setCroppedBackImages;
+      setter(prev => {
+        const updated = prev.map(r => [...r]);
+        if (updated[lightbox.row][lightbox.col]) {
+          URL.revokeObjectURL(updated[lightbox.row][lightbox.col]!.previewUrl);
+        }
+        updated[lightbox.row][lightbox.col] = { file, previewUrl };
+        return updated;
+      });
 
-        const newImg = new Image();
-        newImg.crossOrigin = 'anonymous';
-        newImg.onload = () => { lbCrop.imgRef.current = newImg; };
-        newImg.src = previewUrl;
-        setLightbox({ ...lightbox, src: previewUrl });
-        setLightboxRotation(0);
-        setRotationDegrees(0);
-        toast.success(`Rotation applied (${deg}°)`);
-      }, 'image/jpeg', 0.95);
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+      newImg.onload = () => { lbCrop.imgRef.current = newImg; };
+      newImg.src = previewUrl;
+      setLightbox({ ...lightbox, src: previewUrl });
+      setLightboxRotation(0);
+      setRotationDegrees(0);
+      toast.success(`Rotation applied (${deg}°)`);
     };
 
     // Always load from the current lightbox.src to avoid stale imgRef
@@ -543,30 +546,33 @@ export default function BulkEntry() {
     );
 
     try {
-      cropCanvas.toBlob(blob => {
-        if (!blob || !lightbox) return;
-        const file = new File([blob], `crop_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const previewUrl = URL.createObjectURL(blob);
+      const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.95);
+      const byteStr = atob(dataUrl.split(',')[1]);
+      const ab = new ArrayBuffer(byteStr.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+      const blob = new Blob([ab], { type: 'image/jpeg' });
+      const file = new File([blob], `crop_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const previewUrl = URL.createObjectURL(blob);
 
-        const setter = lightbox.side === 'front' ? setCroppedImages : setCroppedBackImages;
-        setter(prev => {
-          const updated = prev.map(r => [...r]);
-          if (updated[lightbox.row][lightbox.col]) {
-            URL.revokeObjectURL(updated[lightbox.row][lightbox.col]!.previewUrl);
-          }
-          updated[lightbox.row][lightbox.col] = { file, previewUrl };
-          return updated;
-        });
+      const setter = lightbox.side === 'front' ? setCroppedImages : setCroppedBackImages;
+      setter(prev => {
+        const updated = prev.map(r => [...r]);
+        if (updated[lightbox.row][lightbox.col]) {
+          URL.revokeObjectURL(updated[lightbox.row][lightbox.col]!.previewUrl);
+        }
+        updated[lightbox.row][lightbox.col] = { file, previewUrl };
+        return updated;
+      });
 
-        const newImg = new Image();
-        newImg.crossOrigin = 'anonymous';
-        newImg.onload = () => { lbCrop.imgRef.current = newImg; };
-        newImg.src = previewUrl;
-        setLightbox({ ...lightbox, src: previewUrl });
-        setLightboxCropMode(false);
-        lbCrop.reset();
-        toast.success('Image cropped');
-      }, 'image/jpeg', 0.95);
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+      newImg.onload = () => { lbCrop.imgRef.current = newImg; };
+      newImg.src = previewUrl;
+      setLightbox({ ...lightbox, src: previewUrl });
+      setLightboxCropMode(false);
+      lbCrop.reset();
+      toast.success('Image cropped');
     } catch {
       toast.error('Crop failed — try using the Crop button on the cell instead');
     }

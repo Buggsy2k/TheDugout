@@ -283,26 +283,29 @@ export default function CardDetail() {
       ctx.translate(newW / 2, newH / 2);
       ctx.rotate(rad);
       ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-      canvas.toBlob(blob => {
-        if (!blob || !lightbox) return;
-        const file = new File([blob], `rotated_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const previewUrl = URL.createObjectURL(blob);
-        if (lightbox.side === 'front') {
-          setImageFile(file);
-          setImagePreview(previewUrl);
-        } else {
-          setBackImageFile(file);
-          setBackImagePreview(previewUrl);
-        }
-        const newImg = new Image();
-        newImg.crossOrigin = 'anonymous';
-        newImg.onload = () => { lbCrop.imgRef.current = newImg; };
-        newImg.src = previewUrl;
-        setLightbox({ ...lightbox, src: previewUrl });
-        setLightboxRotation(0);
-        setRotationDegrees(0);
-        toast.success(`Rotation applied (${deg}°)`);
-      }, 'image/jpeg', 0.95);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      const byteStr = atob(dataUrl.split(',')[1]);
+      const ab = new ArrayBuffer(byteStr.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+      const blob = new Blob([ab], { type: 'image/jpeg' });
+      const file = new File([blob], `rotated_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const previewUrl = URL.createObjectURL(blob);
+      if (lightbox.side === 'front') {
+        setImageFile(file);
+        setImagePreview(previewUrl);
+      } else {
+        setBackImageFile(file);
+        setBackImagePreview(previewUrl);
+      }
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+      newImg.onload = () => { lbCrop.imgRef.current = newImg; };
+      newImg.src = previewUrl;
+      setLightbox({ ...lightbox, src: previewUrl });
+      setLightboxRotation(0);
+      setRotationDegrees(0);
+      toast.success(`Rotation applied (${deg}°)`);
     };
     // Always load from the current lightbox.src to avoid stale imgRef
     const img = new Image();
@@ -329,26 +332,29 @@ export default function CardDetail() {
     if (!ctx) return;
     ctx.drawImage(img, Math.round(x), Math.round(y), Math.round(w), Math.round(h), 0, 0, cropCanvas.width, cropCanvas.height);
     try {
-      cropCanvas.toBlob(blob => {
-        if (!blob || !lightbox) return;
-        const file = new File([blob], `crop_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const previewUrl = URL.createObjectURL(blob);
-        if (lightbox.side === 'front') {
-          setImageFile(file);
-          setImagePreview(previewUrl);
-        } else {
-          setBackImageFile(file);
-          setBackImagePreview(previewUrl);
-        }
-        const newImg = new Image();
-        newImg.crossOrigin = 'anonymous';
-        newImg.onload = () => { lbCrop.imgRef.current = newImg; };
-        newImg.src = previewUrl;
-        setLightbox({ ...lightbox, src: previewUrl });
-        setLightboxCropMode(false);
-        lbCrop.reset();
-        toast.success('Image cropped');
-      }, 'image/jpeg', 0.95);
+      const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.95);
+      const byteStr = atob(dataUrl.split(',')[1]);
+      const ab = new ArrayBuffer(byteStr.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+      const blob = new Blob([ab], { type: 'image/jpeg' });
+      const file = new File([blob], `crop_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const previewUrl = URL.createObjectURL(blob);
+      if (lightbox.side === 'front') {
+        setImageFile(file);
+        setImagePreview(previewUrl);
+      } else {
+        setBackImageFile(file);
+        setBackImagePreview(previewUrl);
+      }
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+      newImg.onload = () => { lbCrop.imgRef.current = newImg; };
+      newImg.src = previewUrl;
+      setLightbox({ ...lightbox, src: previewUrl });
+      setLightboxCropMode(false);
+      lbCrop.reset();
+      toast.success('Image cropped');
     } catch { toast.error('Crop failed'); }
   };
   cropConfirmRef.current = handleLightboxCropConfirm;
